@@ -32,6 +32,87 @@
     });
     return result;
   }
+  function notebookCollectionIds(state, collection = 'all', reference = new Date()) {
+    const records = object(state.notebook) ? state.notebook : {};
+    if (!['all', 'today', 'week'].includes(collection)) {
+      const members = own(state.notebookUnits || {}, collection) ? state.notebookUnits[collection]?.wordIds : [];
+      return unique((Array.isArray(members) ? members : []).filter(id => safeId(id) && own(records, id)));
+    }
+    const current = new Date(reference);
+    const until = current.getTime();
+    const start = new Date(current); start.setHours(0, 0, 0, 0);
+    if (collection === 'week') start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+    return Object.keys(records).filter(id => {
+      if (!safeId(id) || !object(records[id])) return false;
+      if (collection === 'all') return true;
+      const wrongAt = Date.parse(records[id].lastWrongAt || '');
+      return Number.isFinite(wrongAt) && wrongAt >= start.getTime() && wrongAt <= until;
+    }).sort((a, b) => time(records[a].lastWrongAt) - time(records[b].lastWrongAt) || a.localeCompare(b));
+  }
+  function cleanNotebookUnits(units, notebook) {
+    const result = {}, assigned = new Set(), usedNumbers = new Set();
+    if (!object(units)) return result;
+    const numberOf = unit => Math.min(1000000000, Math.max(1, Math.floor(Number(unit.number) || 1)));
+    const entries = Object.entries(units).filter(([id, unit]) => safeId(id) && object(unit));
+    const reservedNumbers = new Set(entries.map(([, unit]) => numberOf(unit)));
+    let nextNumber = Math.max(0, ...reservedNumbers) + 1;
+    entries.sort(([idA, a], [idB, b]) =>
+      (Number(a.number) || 0) - (Number(b.number) || 0) || time(a.createdAt) - time(b.createdAt) || idA.localeCompare(idB)).forEach(([id, unit]) => {
+      const wordIds = unique((Array.isArray(unit.wordIds) ? unit.wordIds : []).filter(wordId => safeId(wordId) && own(notebook, wordId) && !assigned.has(wordId))).slice(0, 30);
+      if (!wordIds.length) return;
+      wordIds.forEach(wordId => assigned.add(wordId));
+      const originalNumber = numberOf(unit);
+      let number = originalNumber;
+      if (usedNumbers.has(number)) {
+        if (nextNumber > 1000000000) nextNumber = 1;
+        while (usedNumbers.has(nextNumber) || reservedNumbers.has(nextNumber)) nextNumber++;
+        number = nextNumber++;
+      }
+      usedNumbers.add(number);
+      const originalName = short(unit.name, 80).trim() || `错词单元 ${originalNumber}`;
+      const name = originalName === `错词单元 ${originalNumber}` ? `错词单元 ${number}` : originalName;
+      result[id] = {id, number, name, wordIds,
+        source: ['today', 'week'].includes(unit.source) ? unit.source : 'all',
+        createdAt: stamp(unit.createdAt) || '1970-01-01T00:00:00.000Z',
+        updatedAt: stamp(unit.updatedAt) || stamp(unit.createdAt) || '1970-01-01T00:00:00.000Z'};
+    });
+    return result;
+  }
+  function notebookUnitId(wordId) {
+    let first = 2166136261, second = 5381;
+    for (const letter of wordId) { first = Math.imul(first ^ letter.charCodeAt(0), 16777619); second = Math.imul(second, 33) ^ letter.charCodeAt(0); }
+    return `notebook-unit-${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
+  }
+  function organiseNotebook(state, collection = 'all', reference = new Date()) {
+    if (!object(state.notebook)) state.notebook = {};
+    state.notebookUnits = cleanNotebookUnits(state.notebookUnits, state.notebook);
+    const units = Object.values(state.notebookUnits);
+    const assigned = new Set(units.flatMap(unit => unit.wordIds));
+    const ids = notebookCollectionIds(state, collection, reference).filter(id => !assigned.has(id));
+    const updatedAt = new Date(reference).toISOString();
+    let created = 0;
+    ids.forEach(wordId => {
+      let unit = units.find(value => value.wordIds.length < 30);
+      if (!unit) {
+        const number = Math.max(0, ...units.map(value => value.number)) + 1;
+        const anchor = notebookUnitId(wordId);
+        let id = anchor, suffix = 1;
+        while (own(state.notebookUnits, id)) id = `${anchor}-${suffix++}`;
+        unit = {id, number, name: `错词单元 ${number}`, wordIds: [], source: ['today', 'week'].includes(collection) ? collection : 'all', createdAt: updatedAt, updatedAt};
+        state.notebookUnits[id] = unit; units.push(unit); created++;
+      }
+      unit.wordIds.push(wordId); unit.updatedAt = updatedAt;
+    });
+    return {added: ids.length, created, total: units.length};
+  }
+  function mergeNotebookUnits(current, incoming, notebook) {
+    const result = {...current};
+    Object.entries(incoming).forEach(([id, unit]) => {
+      const old = own(result, id) ? result[id] : null;
+      result[id] = old ? {...(time(unit.updatedAt) > time(old.updatedAt) ? unit : old), wordIds: unique([...old.wordIds, ...unit.wordIds])} : unit;
+    });
+    return cleanNotebookUnits(result, notebook);
+  }
   function sanitiseSession(session, validIds) {
     if (!object(session) || !Array.isArray(session.deck)) return null;
     const valid = validIds instanceof Set ? validIds : new Set(Array.isArray(validIds) ? validIds : []);
@@ -113,6 +194,7 @@
     if (!oldNotebook) Object.entries(state.marks).forEach(([id, mark]) => {
       if (mark.status === 'review') state.notebook[id] = {wordId: id, count: 0, lastWrongAt: null, lastAnswer: '', status: 'pending', taskIds: []};
     });
+    state.notebookUnits = cleanNotebookUnits(state.notebookUnits, state.notebook);
     state.tasks.forEach(task => Object.values(task.errors).forEach(row => { row.taskIds = [task.id]; }));
     const active = getTask(state, state.activeTaskId);
     state.activeTaskId = active && active.status !== 'archived' ? active.id : null;
@@ -182,17 +264,18 @@
     });
     state.tasks = Array.from(tasks.values());
     state.notebook = mergeErrorRecords(state.notebook, imported.notebook);
+    state.notebookUnits = mergeNotebookUnits(state.notebookUnits, imported.notebookUnits, state.notebook);
     // Restore a saved location only when no current location exists; importing never discards an in-progress session.
     if (!state.studySession && imported.studySession) state.studySession = imported.studySession;
     if (!state.reviewSession && imported.reviewSession) state.reviewSession = imported.reviewSession;
     if (!state.activeTaskId && imported.activeTaskId) state.activeTaskId = imported.activeTaskId;
     return normalise(state, data);
   }
-  const core = {normalise, createTask, getTask, taskProgress, recordResult, sanitiseSession, merge};
+  const core = {normalise, createTask, getTask, taskProgress, recordResult, sanitiseSession, merge, notebookCollectionIds, organiseNotebook};
   global.OrdrumStudy = core;
 
   let taskFilter = 'active';
-  const notebookFilter = {task: 'all', chapter: 'all', status: 'pending', search: ''};
+  const notebookFilter = {task: 'all', chapter: 'all', status: 'pending', search: '', collection: 'all'};
   let notebookPage = 1;
   const notebookSelection = new Set();
   let dialogView = null;
@@ -287,11 +370,39 @@
     const reset = kind === 'reset';
     openDialog(reset ? '重置任务进度' : '删除学习任务', `<p>确定${reset ? '重置' : '删除'}「${esc(task.name)}」？${reset ? '此任务的掌握标记、错词记录和学习位置会清空。' : '此任务及它的学习位置会移除。'}全局错题本和其他任务会保留。</p><div class="dialog-actions">${action('tasks', '取消', '', 'secondary-button')}${action(`confirm-${kind}`, reset ? '确认重置' : '确认删除', id, 'primary-button study-danger-solid')}</div>`);
   }
+  function notebookUnits() {
+    return Object.values(state.notebookUnits || {}).sort((a, b) => a.number - b.number || time(a.createdAt) - time(b.createdAt) || a.id.localeCompare(b.id));
+  }
+  function notebookCollectionLabel(collection) {
+    return {all: '全部错词', today: '今天错词', week: '本周错词'}[collection] || state.notebookUnits?.[collection]?.name || '全部错词';
+  }
+  function notebookCollectionOptions() {
+    return [['all', '全部错词'], ['today', '今天错词'], ['week', '本周错词'], ...notebookUnits().map(unit => [unit.id, unit.name])];
+  }
+  function refreshNotebookCollections() {
+    if (!['all', 'today', 'week'].includes(notebookFilter.collection) && !own(state.notebookUnits || {}, notebookFilter.collection)) notebookFilter.collection = 'all';
+    const select = query('#study-notebook-collection');
+    const options = notebookCollectionOptions();
+    if (select && (!select.options || select.options.length !== options.length
+      || options.some(([value, text], index) => select.options[index].value !== value || select.options[index].textContent !== text))) {
+      select.innerHTML = options.map(([value, text]) => `<option value="${esc(value)}">${esc(text)}</option>`).join('');
+    }
+    if (select) select.value = notebookFilter.collection;
+  }
+  function renderNotebookShelf() {
+    const holder = query('#notebook-shelf'); if (!holder || !data) return;
+    const all = notebookCollectionIds(state), today = notebookCollectionIds(state, 'today'), week = notebookCollectionIds(state, 'week');
+    const pending = all.filter(id => state.notebook[id].status === 'pending').length;
+    const units = notebookUnits();
+    holder.innerHTML = `<div class="notebook-shelf-summary"><span>${all.length} 个错词 · ${pending} 个待复习</span></div><div class="notebook-shelf-collections">${[['all', '全部错词', all], ['today', '今天错词', today], ['week', '本周错词', week]].map(([id, label, ids]) => `<button type="button" class="notebook-shelf-item" data-action="study-notebook-open" data-id="${id}"><span>${label}</span><span class="notebook-shelf-count">${ids.length}</span></button>`).join('')}</div>${units.length ? `<div class="notebook-shelf-units">${units.map(unit => `<button type="button" class="notebook-shelf-item notebook-shelf-unit" data-action="study-notebook-open" data-id="${esc(unit.id)}"><span>${esc(unit.name)}</span><span class="notebook-shelf-count">${unit.wordIds.length} / 30</span></button>`).join('')}</div>` : '<p class="notebook-shelf-hint">打开错题本，按每 30 词整理成单元。</p>'}`;
+  }
   function notebookRows() {
     const words = new Map(data.words.map(word => [word.id, word]));
+    const collection = new Set(notebookCollectionIds(state, notebookFilter.collection));
     const needle = notebookFilter.search.normalize('NFC').toLocaleLowerCase('sv').trim();
     return Object.values(state.notebook || {}).filter(row => {
       const word = words.get(row.wordId); if (!word) return false;
+      if (!collection.has(row.wordId)) return false;
       if (notebookFilter.status !== 'all' && row.status !== notebookFilter.status) return false;
       if (notebookFilter.task === 'free' && row.taskIds.length) return false;
       if (!['all', 'free'].includes(notebookFilter.task) && !row.taskIds.includes(notebookFilter.task)) return false;
@@ -305,13 +416,23 @@
       return {row, word: override ? {...word, ...override, id: word.id, swedish: word.swedish, chapter: word.chapter} : word};
     }).sort((a, b) => (a.row.status === b.row.status ? 0 : a.row.status === 'pending' ? -1 : 1) || time(b.row.lastWrongAt) - time(a.row.lastWrongAt) || b.row.count - a.row.count);
   }
-  function showNotebook() {
+  function showNotebook(options) {
     if (!data) return;
+    if (options && typeof options === 'object') {
+      notebookFilter.collection = options.unitId || options.collection || 'all';
+      notebookFilter.status = 'all'; notebookFilter.task = 'all'; notebookFilter.chapter = 'all'; notebookFilter.search = '';
+    }
+    if (!['all', 'today', 'week'].includes(notebookFilter.collection) && !own(state.notebookUnits || {}, notebookFilter.collection)) notebookFilter.collection = 'all';
     if (!['all', 'free'].includes(notebookFilter.task) && !getTask(state, notebookFilter.task)) notebookFilter.task = 'all';
     if (notebookFilter.chapter !== 'all' && !data.chapters.some(chapter => Number(chapter.id) === Number(notebookFilter.chapter))) notebookFilter.chapter = 'all';
     notebookSelection.clear(); notebookPage = 1;
-    const pending = Object.values(state.notebook || {}).filter(row => row.status === 'pending').length;
-    openDialog('错题本', `<div class="study-dialog"><p id="study-notebook-summary">共 ${Object.keys(state.notebook || {}).length} 个词条，${pending} 个待复习。重练会保留原来的学习位置。</p><div class="study-notebook-filters"><label>任务<select id="study-notebook-task"><option value="all">全部任务</option><option value="free">自由学习</option>${(state.tasks || []).map(task => `<option value="${esc(task.id)}" ${notebookFilter.task === task.id ? 'selected' : ''}>${esc(task.name)}</option>`).join('')}</select></label><label>章节<select id="study-notebook-chapter"><option value="all">全部章节</option>${data.chapters.map(chapter => `<option value="${Number(chapter.id)}" ${Number(notebookFilter.chapter) === Number(chapter.id) ? 'selected' : ''}>第 ${Number(chapter.id)} 章</option>`).join('')}</select></label><label>状态<select id="study-notebook-status">${[['pending', '待复习'], ['mastered', '已掌握'], ['all', '全部状态']].map(([id, text]) => `<option value="${id}" ${notebookFilter.status === id ? 'selected' : ''}>${text}</option>`).join('')}</select></label></div><label class="sr-only" for="study-notebook-search">搜索错题本</label><input id="study-notebook-search" type="search" placeholder="搜索瑞典语、英文或上次答案…" value="${esc(notebookFilter.search)}"><div id="study-notebook-results"></div></div>`);
+    openDialog('错题本', `<div class="study-dialog">
+      <p id="study-notebook-summary"></p>
+      <div class="study-notebook-organize"><div><strong>整理错词单元</strong><p>每单元最多 30 词；已分组的词保留原单元。</p></div><div class="study-organize-actions">${action('notebook-organize', '整理今天错词', 'today')}${action('notebook-organize', '整理本周错词', 'week')}${action('notebook-organize', '整理全部错词', 'all')}</div></div>
+      <div class="study-notebook-collection-bar"><label>分类<select id="study-notebook-collection">${notebookCollectionOptions().map(([id, label]) => `<option value="${esc(id)}" ${notebookFilter.collection === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>${action('notebook-retry-list', '重练当前列表', '', 'secondary-button')}</div>
+      <p class="study-notebook-date-hint">按本机日期和最近答错时间分类，周一开始。无日期记录见“全部错词”；已掌握的错词仍可查看。</p>
+      <div class="study-notebook-filters"><label>任务<select id="study-notebook-task"><option value="all">全部任务</option><option value="free">自由学习</option>${(state.tasks || []).map(task => `<option value="${esc(task.id)}" ${notebookFilter.task === task.id ? 'selected' : ''}>${esc(task.name)}</option>`).join('')}</select></label><label>章节<select id="study-notebook-chapter"><option value="all">全部章节</option>${data.chapters.map(chapter => `<option value="${Number(chapter.id)}" ${Number(notebookFilter.chapter) === Number(chapter.id) ? 'selected' : ''}>第 ${Number(chapter.id)} 章</option>`).join('')}</select></label><label>状态<select id="study-notebook-status">${[['pending', '待复习'], ['mastered', '已掌握'], ['all', '全部状态']].map(([id, text]) => `<option value="${id}" ${notebookFilter.status === id ? 'selected' : ''}>${text}</option>`).join('')}</select></label></div>
+      <label class="sr-only" for="study-notebook-search">搜索错题本</label><input id="study-notebook-search" type="search" placeholder="搜索瑞典语、英文或上次答案…" value="${esc(notebookFilter.search)}"><div id="study-notebook-results"></div></div>`);
     query('#study-notebook-task').value = notebookFilter.task;
     query('#study-notebook-chapter').value = notebookFilter.chapter;
     renderNotebookResults();
@@ -319,10 +440,12 @@
   }
   function renderNotebookResults() {
     const holder = query('#study-notebook-results'); if (!holder) return;
+    refreshNotebookCollections();
     const summary = query('#study-notebook-summary');
     const records = Object.values(state.notebook || {});
-    if (summary) summary.textContent = `共 ${records.length} 个词条，${records.filter(row => row.status === 'pending').length} 个待复习。重练会保留原来的学习位置。`;
+    if (summary) summary.textContent = `共 ${records.length} 个词条，${records.filter(row => row.status === 'pending').length} 个待复习。当前：${notebookCollectionLabel(notebookFilter.collection)}。`;
     const rows = notebookRows();
+    const retry = query('[data-action="study-notebook-retry-list"]'); if (retry) retry.disabled = !rows.length;
     const visibleIds = new Set(rows.map(({row}) => row.wordId));
     Array.from(notebookSelection).forEach(id => { if (!visibleIds.has(id)) notebookSelection.delete(id); });
     const pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -335,6 +458,12 @@
     holder.querySelectorAll('[data-action="study-notebook-retry"],[data-action="study-notebook-mastered"],[data-action="study-notebook-delete"]').forEach(button => { button.disabled = !notebookSelection.size; });
   }
   function selectedNotebookIds() { return Array.from(notebookSelection).filter(id => own(state.notebook || {}, id)); }
+  function organiseNotebookCollection(collection) {
+    const result = organiseNotebook(state, collection);
+    if (result.added) { save(); renderNotebookShelf(); }
+    renderNotebookResults();
+    notify(result.added ? `已整理 ${result.added} 个错词，新增 ${result.created} 个单元。` : `${notebookCollectionLabel(collection)}没有尚未分组的词。`);
+  }
   function notebookBatch(kind) {
     const ids = selectedNotebookIds(); if (!ids.length) { notify('先选择要操作的词条。'); return; }
     if (kind === 'retry') {
@@ -369,12 +498,13 @@
         task.updatedAt = updatedAt;
       });
     });
+    state.notebookUnits = cleanNotebookUnits(state.notebookUnits, state.notebook);
     notebookSelection.clear(); contextRefresh();
     if (typeof renderSummary === 'function') renderSummary();
     if (typeof renderMode === 'function') renderMode({autoplay: false});
     notify(kind === 'delete' ? '所选词条已从错题本移除。' : '所选错题已标为掌握。');
   }
-  global.OrdrumStudyUI = {showTasks, showCreateTask, showNotebook, renderContext, dialogChanged, captureDialogState, refreshOpenDialog};
+  global.OrdrumStudyUI = {showTasks, showCreateTask, showNotebook, renderContext, renderNotebookShelf, dialogChanged, captureDialogState, refreshOpenDialog};
   if (typeof document === 'undefined' || !document.addEventListener) return;
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-action]');
@@ -385,6 +515,13 @@
       case 'tasks': showTasks(); break;
       case 'create-task': showCreateTask(); break;
       case 'notebook': showNotebook(); break;
+      case 'notebook-open': showNotebook({collection: id}); break;
+      case 'notebook-organize': organiseNotebookCollection(['today', 'week'].includes(id) ? id : 'all'); break;
+      case 'notebook-retry-list': {
+        const ids = notebookRows().map(({row}) => row.wordId);
+        if (ids.length) { closeDialog(); startNotebookReview(ids, ['all', 'free'].includes(notebookFilter.task) ? null : notebookFilter.task); }
+        break;
+      }
       case 'task-filter': taskFilter = button.dataset.value; showTasks(); break;
       case 'activate-task': if (task) { closeDialog(); activateStudyTask(id); } break;
       case 'leave-task': leaveStudyTask(); break;
@@ -429,7 +566,7 @@
   document.addEventListener('change', event => {
     if (!data) return;
     const target = event.target;
-    const filters = {'study-notebook-task': 'task', 'study-notebook-chapter': 'chapter', 'study-notebook-status': 'status'};
+    const filters = {'study-notebook-task': 'task', 'study-notebook-chapter': 'chapter', 'study-notebook-status': 'status', 'study-notebook-collection': 'collection'};
     if (filters[target.id]) { notebookFilter[filters[target.id]] = target.value; notebookPage = 1; renderNotebookResults(); }
     if (target.id === 'study-notebook-select-all') {
       notebookRows().forEach(({row}) => { if (target.checked) notebookSelection.add(row.wordId); else notebookSelection.delete(row.wordId); });

@@ -780,5 +780,72 @@ test('deleting a task retains its wrong words and removes its notebook associati
       if(field){assert.equal(field.value,'还没保存的输入');assert.equal(document.activeElement,field);assert.deepEqual([field.selectionStart,field.selectionEnd],[2,4]);}
     }
   });
+  test('bookshelf date categories include mastered wrong words and keep undated records in all words',()=>{
+    resetStudyFixture();
+    run(`recordStudyResult('bomull','wrong','bom');recordStudyResult('bomull','correct','bomull');recordStudyResult('kaffe','wrong','ka');recordStudyResult('yr','wrong','y');recordStudyResult('skal','revealed');state.notebook.yr.lastWrongAt='2000-01-01T00:00:00.000Z';renderSummary()`);
+    const shelf=lookup('#notebook-shelf').innerHTML;
+    assert.match(shelf,/4 个错词 · 3 个待复习/);
+    assert.match(shelf,/data-id="today"><span>今天错词<\/span><span class="notebook-shelf-count">2<\/span>/);
+    assert.match(shelf,/data-id="week"><span>本周错词<\/span><span class="notebook-shelf-count">2<\/span>/);
+    clickAction('study-notebook-open',{id:'today'});
+    assert.equal(lookup('#study-notebook-status').value,'all');
+    assert.equal(lookup('#study-notebook-collection').value,'today');
+    assert.match(lookup('#study-notebook-results').innerHTML,/听读 \(en\) bomull/);
+    assert.match(lookup('#study-notebook-results').innerHTML,/听读 \(ett\) kaffe/);
+    assert.doesNotMatch(lookup('#study-notebook-results').innerHTML,/听读 yr|听读 en skål/);
+    lookup('#study-notebook-status').value='pending';documentEvent('change',{target:lookup('#study-notebook-status')});
+    assert.doesNotMatch(lookup('#study-notebook-results').innerHTML,/听读 \(en\) bomull/);
+    clickAction('study-notebook-open',{id:'all'});
+    assert.match(lookup('#study-notebook-results').innerHTML,/听读 yr/);
+    assert.equal(run('Object.keys(state.notebook).length'),4);
+  });
+  test('notebook grouping controls save bookshelf units and restore them after a browser reload',()=>{
+    resetStudyFixture();run(`recordStudyResult('bomull','wrong','bom');recordStudyResult('kaffe','wrong','ka');recordStudyResult('here','wrong','har');window.OrdrumStudyUI.showNotebook({collection:'all'})`);
+    clickAction('study-notebook-organize',{id:'all'});
+    const units=json('state.notebookUnits'), unitId=Object.keys(units)[0];
+    assert.equal(Object.keys(units).length,1);
+    assert.equal(units[unitId].wordIds.length,3);
+    assert.match(lookup('#notebook-shelf').innerHTML,/错词单元 1/);
+    assert.match(lookup('#notebook-shelf').innerHTML,/3 \/ 30/);
+    assert.deepEqual(JSON.parse(stored.get('ordrum.rivstart.v1')).notebookUnits,units);
+    const restored=browserReload();assert.deepEqual(restored.json('state.notebookUnits'),units);
+    assert.equal(restored.run('Object.keys(state.notebook).length'),3);
+    clickAction('study-notebook-organize',{id:'all'});
+    assert.deepEqual(json('state.notebookUnits'),units,'a repeated organise action must not regroup words');
+  });
+  test('practising a bookshelf unit preserves the active task checkpoint and revealed side',()=>{
+    resetStudyFixture();
+    run(`state.tasks.push(StudyCore.createTask(data.book,[1],data.words,'按单元复习'));activateStudyTask(state.tasks[0].id);recordStudyResult('bomull','wrong','bom');recordStudyResult('kaffe','wrong','ka');currentDeck=['yr','kaffe','bomull','skal'];flashIndex=2;flipped=true;save();StudyCore.organiseNotebook(state,'all');renderSummary()`);
+    const unitId=run('Object.keys(state.notebookUnits)[0]');
+    clickAction('study-notebook-open',{id:unitId});
+    assert.equal(lookup('#study-notebook-collection').value,unitId);
+    clickAction('study-notebook-retry-list');
+    assert.equal(run('retryMode'),true);
+    assert.deepEqual(new Set(json('currentDeck')),new Set(['bomull','kaffe']));
+    assert.deepEqual(json('activeStudyTask().session.deck'),['yr','kaffe','bomull','skal']);
+    run('returnToStudy()');
+    assert.deepEqual(json('[retryMode,state.mode,currentDeck,flashIndex,flipped]'),[false,'flashcard',['yr','kaffe','bomull','skal'],2,true]);
+  });
+  test('cloud refresh keeps an open notebook unit filter, selection and focus while adding new unit choices',()=>{
+    resetStudyFixture();run(`recordStudyResult('bomull','wrong','bom');StudyCore.organiseNotebook(state,'all');renderSummary()`);
+    const unitId=run('Object.keys(state.notebookUnits)[0]');
+    clickAction('study-notebook-open',{id:unitId});
+    selectNotebookWord('bomull');
+    const collection=lookup('#study-notebook-collection');collection.focus();lookup('#app-dialog').scrollTop=95;
+    const incoming=json('state');
+    incoming.notebook.kaffe={wordId:'kaffe',count:1,lastWrongAt:new Date().toISOString(),status:'pending',taskIds:[]};
+    incoming.notebook.here={wordId:'here',count:1,lastWrongAt:new Date().toISOString(),status:'pending',taskIds:[]};
+    incoming.notebookUnits[unitId].wordIds.push('kaffe');
+    incoming.notebookUnits['remote-unit']={id:'remote-unit',number:2,name:'另一设备整理的单元',wordIds:['here'],source:'all',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+    run(`applyCloudState(${JSON.stringify(incoming)})`);
+    assert.equal(lookup('#study-notebook-collection'),collection);
+    assert.equal(collection.value,unitId);assert.equal(document.activeElement,collection);
+    assert.equal(lookup('#app-dialog').scrollTop,95);
+    assert.match(collection.innerHTML,/另一设备整理的单元/);
+    assert.match(lookup('#study-notebook-results').innerHTML,/已选 1/);
+    assert.match(lookup('#study-notebook-results').innerHTML,/听读 \(ett\) kaffe/);
+    assert.doesNotMatch(lookup('#study-notebook-results').innerHTML,/听读 here/);
+    assert.match(lookup('#notebook-shelf').innerHTML,/另一设备整理的单元/);
+  });
   console.log(`\n${passed} focused checks passed.`);
 })().catch(error => {console.error(error);process.exitCode=1;});

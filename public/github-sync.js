@@ -249,43 +249,54 @@
   function render() {
     const button = document.querySelector('#sync-account-button');
     if (button) { button.hidden = false; button.textContent = connection ? 'GitHub 同步设置' : '连接 GitHub 同步'; button.onclick = connect; }
+    const syncNow = document.querySelector('#sync-now-button');
+    if (syncNow) { syncNow.disabled = !connection; syncNow.onclick = () => global.OrdrumCloud?.sync(); }
     const holder = document.querySelector('#local-sync-context');
     if (holder) {
       holder.hidden = false;
       holder.textContent = connection ? `已连接私有同步仓库 ${connection.owner}/${connection.repo}。学习记录会自动同步。${lastError ? ' '+lastError : ''}` : '连接 GitHub 私有同步仓库，让本地网页与 iPhone 共用学习任务和进度。未连接时，记录仍保存在此设备。';
     }
   }
-  function connect() {
+  function mount(target) {
+    if (!target) return null;
+    if (dialog) { if (dialog.parentNode !== target) target.appendChild(dialog); return dialog; }
     if (!dialog) {
-      dialog = document.createElement('dialog'); dialog.id = 'github-sync-dialog';
-      dialog.style.cssText = 'max-width:560px;width:calc(100% - 32px);border:1px solid #d8d6d0;border-radius:20px;padding:24px;color:#183f38;background:#fffdf8;';
-      dialog.innerHTML = '<form id="github-sync-form"><h2>连接 GitHub 私有同步仓库</h2><p>在每台设备连接同一个私有仓库，之后自动同步任务、进度和错词。</p><p><a href="https://github.com/new" target="_blank" rel="noopener noreferrer">创建私有仓库</a> · <a href="https://github.com/settings/personal-access-tokens/new?name=Ordrum%20progress&description=Only%20the%20private%20ordrum-progress%20repository&target_name=silunzh&contents=write" target="_blank" rel="noopener noreferrer">创建专用访问令牌</a></p><p>令牌只选择同步仓库，授予 Contents 读写权限。请直接粘贴在这里。</p><label>GitHub 用户名<input name="owner" autocomplete="off" required maxlength="39" style="display:block;width:100%;margin:6px 0 14px"></label><label>私有仓库名<input name="repo" autocomplete="off" required maxlength="100" style="display:block;width:100%;margin:6px 0 14px"></label><label>访问令牌<input name="token" type="password" autocomplete="off" required maxlength="255" spellcheck="false" style="display:block;width:100%;margin:6px 0 14px"></label><label style="display:block;margin:12px 0"><input type="checkbox" name="remember"> 在此浏览器记住连接</label><p style="font-size:13px">默认仅在当前标签页会话保存。勾选后，令牌将保存在此浏览器；请只在自己的设备使用。</p><label style="display:block;margin:12px 0"><input type="checkbox" name="migrateExisting"> 将此设备现有学习记录合并到这个 GitHub 账号（首次迁移）</label><p id="github-sync-message" role="status" style="white-space:pre-wrap"></p><div style="display:flex;gap:12px;flex-wrap:wrap"><button type="submit">连接并同步</button><button type="button" id="github-sync-disconnect">断开连接</button><button type="button" id="github-sync-cancel">取消</button></div></form>';
-      document.body.appendChild(dialog);
+      dialog = document.createElement('div'); dialog.id = 'github-sync-panel'; dialog.className = 'github-sync-panel';
+      dialog.innerHTML = '<form id="github-sync-form"><h3>私有进度仓库</h3><p>在每台设备连接同一个私有仓库，之后自动同步任务、进度和错词。</p><p><a href="https://github.com/new" target="_blank" rel="noopener noreferrer">新建仓库</a> · <a href="https://github.com/settings/personal-access-tokens/new?name=Ordrum%20progress&description=Only%20the%20private%20ordrum-progress%20repository&target_name=silunzh&contents=write" target="_blank" rel="noopener noreferrer">创建访问令牌</a></p><p>令牌只选择同步仓库，授予 Contents 读写权限。请直接粘贴在这里。</p><label>GitHub 用户名<input name="owner" autocomplete="off" required maxlength="39" style="display:block;width:100%;margin:6px 0 14px"></label><label>私有仓库名<input name="repo" autocomplete="off" required maxlength="100" style="display:block;width:100%;margin:6px 0 14px"></label><label>访问令牌<input name="token" type="password" autocomplete="off" required maxlength="255" spellcheck="false" style="display:block;width:100%;margin:6px 0 14px"></label><label style="display:block;margin:12px 0"><input type="checkbox" name="remember"> 在此浏览器记住连接</label><p style="font-size:13px">默认仅在当前标签页会话保存。勾选后，令牌将保存在此浏览器；请只在自己的设备使用。</p><label style="display:block;margin:12px 0"><input type="checkbox" name="migrateExisting"> 将此设备现有学习记录合并到这个 GitHub 账号（首次迁移）</label><p id="github-sync-message" role="status" style="white-space:pre-wrap"></p><div style="display:flex;gap:12px;flex-wrap:wrap"><button type="submit" class="primary-button">保存连接并同步</button><button type="button" class="secondary-button" id="github-sync-disconnect">断开连接</button></div></form>';
+      target.appendChild(dialog);
       const form = dialog.querySelector('form');
       form.addEventListener('submit',async event => {
         event.preventDefault(); const message = dialog.querySelector('#github-sync-message'); const submit = form.querySelector('[type="submit"]');
         submit.disabled = true; message.textContent = '正在检查账号与私有仓库…';
         try {
           await configure({owner:form.elements.owner.value.trim(),repo:form.elements.repo.value.trim(),token:form.elements.token.value.trim(),remember:form.elements.remember.checked,migrateExisting:form.elements.migrateExisting.checked});
-          form.elements.token.value = ''; message.textContent = ''; dialog.close();
+          form.elements.token.value = ''; message.textContent = '已连接，正在同步学习记录。';
           notice('GitHub 已连接，正在同步学习记录。'); global.OrdrumCloud?.updateConnectionStatus();
         } catch (value) { message.textContent = value.message || '无法连接，请检查仓库与令牌权限。'; }
         finally { submit.disabled = false; }
       });
-      dialog.querySelector('#github-sync-cancel').onclick = () => { form.elements.token.value = ''; dialog.close(); };
-      dialog.querySelector('#github-sync-disconnect').onclick = () => { form.elements.token.value = ''; disconnect(); dialog.close(); };
-      dialog.addEventListener('cancel',() => { form.elements.token.value = ''; });
-      dialog.addEventListener('close',() => { form.elements.token.value = ''; });
+      dialog.querySelector('#github-sync-disconnect').onclick = () => { form.elements.token.value = ''; disconnect(); messageDisconnected(); };
+      global.addEventListener('ordrum:settings-close',() => { form.elements.token.value = ''; });
     }
     const form = dialog.querySelector('form'); form.elements.owner.value = connection?.owner || 'silunzh'; form.elements.repo.value = connection?.repo || 'ordrum-progress';
-    form.elements.token.value = ''; form.elements.remember.checked = false; form.elements.migrateExisting.checked = !connection;
+    form.elements.token.value = ''; form.elements.remember.checked = connection?.remember === true; form.elements.migrateExisting.checked = !connection;
     dialog.querySelector('#github-sync-message').textContent = lastError;
-    if (!dialog.open) dialog.showModal(); return true;
+    return dialog;
+  }
+  function messageDisconnected() {
+    const message = dialog?.querySelector('#github-sync-message');
+    if (message) message.textContent = '已断开同步，学习记录保留在此设备。';
+  }
+  function connect() {
+    if (!global.OrdrumSettings) return false;
+    global.OrdrumSettings.open('sync');
+    dialog?.querySelector('input[name="token"]')?.focus();
+    return true;
   }
   function cloudOptions(onNotice) {
     if (typeof onNotice === 'function') notice = onNotice;
     render();
     return {transport,isConnected,connect,allowProviderMigration,onProviderMigrationCommitted,pollIntervalMs:120000,debounceMs:5000,localLabel:'连接 GitHub 以同步学习进度',localHref:'#',signInLabel:'重新连接 GitHub 同步',signInHref:'#'};
   }
-  global.OrdrumGitHubSync = {enabled:true,cloudOptions,connect,disconnect,isConnected,transport,configure,getStatus:snapshot,allowProviderMigration,onProviderMigrationCommitted};
+  global.OrdrumGitHubSync = {enabled:true,cloudOptions,connect,mount,disconnect,isConnected,transport,configure,getStatus:snapshot,allowProviderMigration,onProviderMigrationCommitted};
 })(window);

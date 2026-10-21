@@ -4,7 +4,7 @@
 
 1. 使用独立私有仓库 `silunzh/ordrum-progress`，默认分支 `main`，含 README。不要使用公开的 `ordrum` 代码仓库。
 2. 在 GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens 新建令牌。Repository access 选 Only select repositories，只选 `ordrum-progress`。Repository permissions 中仅把 Contents 设为 Read and write；Metadata 为必需只读权限。设置合适到期日。
-3. 在 Ordrum 的「同步设置」填 `silunzh`、`ordrum-progress` 与令牌。请直接填到应用，不要发送到聊天。每台设备都需配置；可分别生成权限相同的令牌，便于单独撤销。
+3. 在 Ordrum 的「设置 → 同步设置」填 `silunzh`、`ordrum-progress` 与令牌。请直接填到应用，不要发送到聊天。每台设备都需配置；可分别生成权限相同的令牌，便于单独撤销。
 4. 若这是从旧站迁移，在确认页面选择「将此设备现有学习记录合并到此私有仓库」。先导出备份。普通换账号或仓库时不应合并别人的记录。
 5. 若希望重开浏览器后继续自动同步，勾选「在此浏览器记住连接」。未勾选时，令牌仅保存在当前会话。令牌到期或被撤销后，本机学习仍保留，可重新配置。
 

@@ -81,6 +81,20 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
     assert.deepEqual(app.state,remote);assert.equal(app.requests.length,1);assert.equal(app.statuses.at(-1),'synced');
     assert.equal(JSON.parse(app.storage.get(META)).revision,7);
   });
+  await test('concurrent mistake unit additions preserve all baseline members before deterministic overflow',()=>{
+    const ids=Array.from({length:29},(_,i)=>`z${i}`);
+    const unit=wordIds=>({notebookUnits:{'unit-a':{wordIds}}});
+    const merged=pure.mergeThreeWay(unit(ids),unit([...ids,'a']),unit([...ids,'b']));
+    assert.deepEqual(clone(merged.notebookUnits['unit-a'].wordIds),[...ids,'a','b']);
+    assert.deepEqual(clone(merged.notebookUnits['unit-a'].wordIds.slice(0,30)),[...ids,'a']);
+    assert.deepEqual(clone(pure.mergeThreeWay(unit(ids),unit([...ids,'b']),unit([...ids,'a']))),clone(merged));
+  });
+  await test('explicit mistake unit deletion wins over a concurrent membership addition',()=>{
+    const base={notebookUnits:{'unit-a':{wordIds:['one']}}};
+    const local={notebookUnits:{}};
+    const remote={notebookUnits:{'unit-a':{wordIds:['one','two']}}};
+    assert.deepEqual(clone(pure.mergeThreeWay(base,local,remote)),local);
+  });
   await test('unsigned or non-JSON login responses never cause a progress upload',async()=>{
     for(const response of [Response.json({error:'sign_in_required'},{status:401}),new Response('<html>Sign in</html>',{headers:{'content-type':'text/html'}})]){
       const state={...empty(),marks:{local:known('2026-10-20T10:00:00Z')}};
@@ -100,7 +114,12 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
       assert.equal(prevented,false,'sign-in must retain normal top-level anchor navigation');
       assert.equal(app.storage.has(META),false);
     }
-    assert.match(fs.readFileSync(path.resolve(__dirname,'../public/index.html'),'utf8'),/<a id="cloud-status"/);
+    const html=fs.readFileSync(path.resolve(__dirname,'../public/index.html'),'utf8');
+    const settings=fs.readFileSync(path.resolve(__dirname,'../public/settings.js'),'utf8');
+    assert.match(html,/src="settings.js"/);
+    assert.match(settings,/<a id="cloud-status"/);
+    assert.ok(!html.includes('id="cloud-status"'));
+
   });
   await test('cloud requests bypass HTTP caches and inspect redirects manually with same-origin credentials',async()=>{
     const state={...empty(),marks:{word:known('2026-10-20T10:00:00Z')}};

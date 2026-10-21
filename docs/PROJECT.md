@@ -11,6 +11,8 @@ ordrum/
 │   ├── study.js/.css        学习任务与错题本
 │   ├── session.js           学习位置、听写草稿与恢复
 │   ├── cloud.js             账号隔离与自动同步
+│   ├── settings.js/.css     统一设置、设备外观与主题
+│   ├── workspace.css        简洁书架与移动布局
 │   ├── github-sync.js       私有 GitHub 进度仓库连接、凭据和传输
 │   ├── local-sync.js        旧账号桥参考，不参与静态发布
 │   ├── sync-bridge.js       旧服务参考，不参与静态发布
@@ -52,7 +54,7 @@ ordrum/
 | 修改安装、更新和离线使用 | `public/pwa.js`、`public/service-worker.js`、`public/manifest.webmanifest` |
 | 修改数据库结构 | `db/schema.ts`，再生成新的 `drizzle/` 迁移 |
 
-`tests/frontend.test.cjs` 检查学习交互和同步后列表刷新；`study.test.cjs` 检查任务与错题记录；`server.test.cjs` 检查数据库接口与账号隔离；`cloud.test.cjs` 检查同步和中断恢复；`local-sync.test.cjs`、`sync-bridge.test.cjs` 检查本地连接和授权边界；`local-server.test.cjs` 检查 Mac 启动时避开旧界面缓存；`pwa.test.cjs` 检查安装与缓存。运行方式见根目录 README。
+`tests/frontend.test.cjs` 检查学习交互和同步后列表刷新；`study.test.cjs` 检查任务与错题记录；`server.test.cjs` 检查数据库接口与账号隔离；`cloud.test.cjs` 检查同步和中断恢复；`settings.test.cjs` 检查设置标签、表单草稿、外观与焦点；`local-sync.test.cjs`、`sync-bridge.test.cjs` 检查本地连接和授权边界；`local-server.test.cjs` 检查 Mac 启动时避开旧界面缓存；`pwa.test.cjs` 检查安装与缓存。运行方式见根目录 README。
 
 ## 数据与本机文件
 

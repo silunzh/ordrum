@@ -213,5 +213,143 @@ test('concurrent copies of one task merge word progress without discarding eithe
   assert.equal(core.taskProgress(merged).known,2);
 });
 
+const manyData = {...data, words:Array.from({length:65},(_,index)=>({id:`word-${String(index + 1).padStart(2,'0')}`,chapter:1,swedish:`ord ${index + 1}`}))};
+function mistakeState(count=61) {
+  return core.normalise({marks:{},notebook:Object.fromEntries(manyData.words.slice(0,count).map((word,index)=>[word.id,{wordId:word.id,count:1,status:index%2?'mastered':'pending',lastWrongAt:'2026-10-21T09:00:00.000Z',taskIds:[]}]))},manyData);
+}
+test('today uses local midnight and excludes future and undated errors without deleting them',()=>{
+  const current=new Date(2026,9,25,12,0,0);
+  const midnight=new Date(2026,9,25,0,0,0);
+  const state=fresh({notebook:{
+    arbetar:{count:1,status:'mastered',lastWrongAt:midnight.toISOString()},
+    barn:{count:1,lastWrongAt:new Date(midnight.getTime()-1).toISOString()},
+    here:{count:1,lastWrongAt:new Date(current.getTime()+1).toISOString()},
+    beer:{count:0,lastWrongAt:'invalid'},
+  }});
+  assert.deepEqual(plain(core.notebookCollectionIds(state,'today',current)),['arbetar']);
+  assert.equal(core.notebookCollectionIds(state,'all',current).length,4);
+  assert.equal(state.notebook.arbetar.status,'mastered');
+  assert.equal(state.notebook.beer.lastWrongAt,null);
+});
+test('the local week starts on Monday including a daylight-saving transition',()=>{
+  const sunday=new Date(2026,9,25,12,0,0), monday=new Date(2026,9,19,0,0,0);
+  const state=fresh({notebook:{
+    arbetar:{count:1,lastWrongAt:monday.toISOString()},
+    barn:{count:1,lastWrongAt:new Date(monday.getTime()-1).toISOString()},
+    here:{count:1,lastWrongAt:sunday.toISOString()},
+    beer:{count:0,lastWrongAt:null},
+  }});
+  assert.deepEqual(plain(core.notebookCollectionIds(state,'week',sunday)),['arbetar','here']);
+  assert.deepEqual(plain(core.notebookCollectionIds(state,'week',new Date(2026,9,26,0,0,0))),[]);
+  assert.equal(Object.keys(state.notebook).length,4);
+});
+test('61 errors become stable 30, 30 and 1 word units without changing history or mastery',()=>{
+  const state=mistakeState(), before=clone(state.notebook);
+  const result=core.organiseNotebook(state,'all',new Date('2026-10-21T12:00:00Z'));
+  assert.deepEqual(plain(result),{added:61,created:3,total:3});
+  const units=Object.values(state.notebookUnits).sort((a,b)=>a.number-b.number);
+  assert.deepEqual(units.map(unit=>unit.wordIds.length),[30,30,1]);
+  assert.deepEqual(units.map(unit=>unit.name),['错词单元 1','错词单元 2','错词单元 3']);
+  assert.equal(new Set(units.flatMap(unit=>unit.wordIds)).size,61);
+  assert.deepEqual(plain(state.notebook),before);
+});
+test('organising an already grouped notebook is idempotent across reload',()=>{
+  const state=mistakeState();core.organiseNotebook(state,'all');
+  const before=clone(state.notebookUnits), restored=core.normalise(clone(state),manyData);
+  assert.deepEqual(plain(core.organiseNotebook(restored,'all')),{added:0,created:0,total:3});
+  assert.deepEqual(plain(restored.notebookUnits),before);
+});
+test('new errors append to the partial unit while existing membership and names stay fixed',()=>{
+  const state=mistakeState();core.organiseNotebook(state,'all');
+  const before=clone(state.notebookUnits), last=Object.values(state.notebookUnits).find(unit=>unit.number===3);
+  core.recordResult(state,'word-62','wrong','new answer');
+  assert.equal(core.organiseNotebook(state,'all').added,1);
+  for(const [id,unit] of Object.entries(before)) {
+    assert.equal(state.notebookUnits[id].name,unit.name);
+    assert.deepEqual(plain(state.notebookUnits[id].wordIds.slice(0,unit.wordIds.length)),unit.wordIds);
+  }
+  assert.deepEqual(plain(last.wordIds),['word-61']);
+  assert.deepEqual(plain(state.notebookUnits[last.id].wordIds),['word-61','word-62']);
+  assert.equal(Object.keys(state.notebook).length,62);
+});
+test('two devices organising the same errors derive the same stable unit identities',()=>{
+  const first=mistakeState(), second=mistakeState();
+  core.organiseNotebook(first,'all',new Date('2026-10-21T11:00:00Z'));
+  core.organiseNotebook(second,'all',new Date('2026-10-21T12:00:00Z'));
+  assert.deepEqual(Object.keys(first.notebookUnits),Object.keys(second.notebookUnits));
+  const merged=core.merge(first,second,manyData);
+  assert.equal(Object.keys(merged.notebookUnits).length,3);
+  assert.equal(new Set(Object.values(merged.notebookUnits).flatMap(unit=>unit.wordIds)).size,61);
+});
+test('organising dated subsets leaves older and undated errors available for later grouping',()=>{
+  const current=new Date(2026,9,21,12,0,0), today=new Date(2026,9,21,9,0,0), monday=new Date(2026,9,19,9,0,0);
+  const state=fresh({notebook:{
+    arbetar:{count:1,status:'mastered',lastWrongAt:today.toISOString()},
+    barn:{count:1,lastWrongAt:monday.toISOString()},
+    here:{count:1,lastWrongAt:new Date(2026,9,18,9,0,0).toISOString()},
+    beer:{count:0,lastWrongAt:null},
+  }});
+  assert.equal(core.organiseNotebook(state,'today',current).added,1);
+  assert.equal(core.organiseNotebook(state,'week',current).added,1);
+  assert.equal(core.organiseNotebook(state,'all',current).added,2);
+  assert.equal(Object.keys(state.notebook).length,4);
+  assert.equal(Object.values(state.notebookUnits).flatMap(unit=>unit.wordIds).length,4);
+});
+test('imported units are bounded, deduplicated and keep overflow errors unassigned rather than deleting them',()=>{
+  const state=mistakeState();
+  state.notebookUnits={
+    later:{number:2,createdAt:'2026-10-21T10:00:00Z',wordIds:['word-01','word-31','missing']},
+    earlier:{number:1,createdAt:'2026-10-21T10:00:00Z',wordIds:[...manyData.words.map(word=>word.id),'word-01']},
+    invalid:null, empty:{number:3,wordIds:['missing']},
+  };
+  core.normalise(state,manyData);
+  assert.deepEqual(plain(state.notebookUnits.earlier.wordIds),manyData.words.slice(0,30).map(word=>word.id));
+  assert.deepEqual(plain(state.notebookUnits.later.wordIds),['word-31']);
+  assert.equal(state.notebookUnits.empty,undefined);
+  assert.equal(Object.keys(state.notebook).length,61);
+  assert.equal(core.organiseNotebook(state,'all').added,30);
+  assert.equal(new Set(Object.values(state.notebookUnits).flatMap(unit=>unit.wordIds)).size,61);
+});
+test('backup merge preserves both device unit memberships and all original wrong records',()=>{
+  const local=mistakeState(2);core.organiseNotebook(local,'all');
+  const incoming=clone(local), unitId=Object.keys(local.notebookUnits)[0];
+  core.recordResult(local,'word-03','wrong','third');core.organiseNotebook(local,'all');
+  core.recordResult(incoming,'word-04','wrong','fourth');core.organiseNotebook(incoming,'all');
+  const merged=core.merge(local,incoming,manyData);
+  assert.deepEqual(new Set(merged.notebookUnits[unitId].wordIds),new Set(['word-01','word-02','word-03','word-04']));
+  assert.equal(Object.keys(merged.notebook).length,4);
+});
+test('deleting a notebook record removes only that word from its unit on reload',()=>{
+  const state=mistakeState(2);core.organiseNotebook(state,'all');
+  const unitId=Object.keys(state.notebookUnits)[0];delete state.notebook['word-01'];
+  const restored=core.normalise(clone(state),manyData);
+  assert.deepEqual(plain(restored.notebookUnits[unitId].wordIds),['word-02']);
+  assert.equal(restored.notebook['word-01'],undefined);
+  assert.equal(core.notebookCollectionIds(restored,unitId).length,1);
+});
+test('concurrent unit number collisions get stable new numbers without renumbering other units or custom names',()=>{
+  const state=mistakeState(5);
+  state.notebookUnits={
+    original:{id:'original',number:1,name:'错词单元 1',wordIds:['word-01'],createdAt:'2026-10-21T09:00:00Z'},
+    concurrent:{id:'concurrent',number:1,name:'错词单元 1',wordIds:['word-02'],createdAt:'2026-10-21T10:00:00Z'},
+    custom:{id:'custom',number:1,name:'我的听写难词',wordIds:['word-03'],createdAt:'2026-10-21T11:00:00Z'},
+    unaffected:{id:'unaffected',number:2,name:'错词单元 2',wordIds:['word-04','word-05'],createdAt:'2026-10-21T12:00:00Z'},
+  };
+  const members=Object.fromEntries(Object.entries(state.notebookUnits).map(([id,unit])=>[id,unit.wordIds]));
+  core.normalise(state,manyData);
+  assert.equal(state.notebookUnits.original.number,1);
+  assert.equal(state.notebookUnits.unaffected.number,2);
+  assert.equal(state.notebookUnits.unaffected.name,'错词单元 2');
+  assert.equal(state.notebookUnits.concurrent.number,3);
+  assert.equal(state.notebookUnits.concurrent.name,'错词单元 3');
+  assert.equal(state.notebookUnits.custom.number,4);
+  assert.equal(state.notebookUnits.custom.name,'我的听写难词');
+  assert.deepEqual(plain(Object.fromEntries(Object.entries(state.notebookUnits).map(([id,unit])=>[id,unit.wordIds]))),members);
+  const stable=clone(state.notebookUnits);
+  const reloaded=core.normalise(clone(state),manyData);
+  assert.deepEqual(plain(reloaded.notebookUnits),stable);
+  assert.equal(Object.keys(reloaded.notebook).length,5);
+});
+
 console.log(`\n${passed} study checks passed${failed?`, ${failed} failed`:''}.`);
 if(failed)process.exitCode=1;

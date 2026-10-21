@@ -9,6 +9,7 @@
 
   function localSaveEvent() { window.dispatchEvent(new Event('ordrum:before-update')); }
   function showInstallHelp() {
+    if (window.OrdrumSettings) return window.OrdrumSettings.open('iphone');
     let dialog = byId('pwa-install-dialog');
     if (!dialog) {
       dialog = document.createElement('dialog');dialog.id='pwa-install-dialog';dialog.className='pwa-dialog';
@@ -21,9 +22,23 @@
         }
       });
     }
-    const status = offlineReady ? '界面与词库已准备好，可离线打开。' : installError ? '当前没有完成离线准备，联网时仍可正常学习。' : '正在准备离线界面与词库，首次使用请保持联网。';
-    dialog.innerHTML = '<div class="dialog-header"><h2 id="pwa-install-title">'+(installed() ? '你的 Ordrum App' : '把单词室放到 iPhone')+'</h2><button class="close-button" data-pwa-action="close" aria-label="关闭">'+closeIcon+'</button></div><div class="dialog-body"><div class="pwa-app-intro"><img src="icons/apple-touch-icon.png" width="60" height="60" alt="Ordrum 应用图标"><div><strong>Ordrum</strong><span>和网页一样，继续你的学习。</span></div></div>'+(installed() ? '<p>你已经在主屏幕版中，可以直接使用章节、卡片、听写、学习任务和错题本。</p>' : '<ol class="pwa-install-steps"><li><b>在 iPhone 的 Safari 打开本站。</b><span>若当前在其他应用内，请先选择“在 Safari 中打开”。</span></li><li><b>点按 Safari 的“分享”按钮。</b><span>在菜单中找到“添加到主屏幕”。</span></li><li><b>保留“作为网页 App 打开”，再点“添加”。</b><span>此开关如有显示，请保持开启；之后从主屏幕的 Ordrum 图标进入。</span></li></ol>')+(installPrompt ? '<button class="primary-button" data-pwa-action="native-install">'+phoneIcon+'安装到此设备</button>' : '')+'<div class="pwa-offline-status" role="status"><span class="pwa-status-dot '+(offlineReady ? 'ready' : '')+'"></span>'+status+'</div><h3>进度和账号</h3><p>主屏幕版与 Safari 的本地存储可能分开。请在手机和电脑的「同步设置」中连接同一账号的同一个 GitHub 私有进度仓库；如需手动迁移，也可以在备份入口导出、导入记录。</p><h3>离线与读音</h3><p>离线准备完成后，界面与词库可离线使用。读音会在联网播放时逐步缓存，离线只能使用已经缓存的部分；语音补读取决于系统。配置与跨设备同步需要联网。</p><p>iPhone 可能要求先点按一次播放按钮，才允许自动读音。若没有声音，请点单词旁的喇叭。设备也可能清理网页缓存，请保留重要记录的备份。</p><div class="dialog-actions"><button class="primary-button" data-pwa-action="close">继续学习</button></div></div>';
+    dialog.innerHTML = installMarkup();
     if (!dialog.open) dialog.showModal();
+  }
+  function installMarkup() {
+    const status = offlineReady ? '界面与词库已准备好，可离线打开。' : installError ? '当前没有完成离线准备，联网时仍可正常学习。' : '正在准备离线界面与词库，首次使用请保持联网。';
+    return '<div class="dialog-header"><h2 id="pwa-install-title">'+(installed() ? '你的 Ordrum App' : '把单词室放到 iPhone')+'</h2><button class="close-button" data-pwa-action="close" aria-label="关闭">'+closeIcon+'</button></div><div class="dialog-body"><div class="pwa-app-intro"><img src="icons/apple-touch-icon.png" width="60" height="60" alt="Ordrum 应用图标"><div><strong>Ordrum</strong><span>和网页一样，继续你的学习。</span></div></div>'+(installed() ? '<p>你已经在主屏幕版中，可以直接使用章节、卡片、听写、学习任务和错题本。</p>' : '<ol class="pwa-install-steps"><li><b>在 iPhone 的 Safari 打开本站。</b><span>若当前在其他应用内，请先选择“在 Safari 中打开”。</span></li><li><b>点按 Safari 的“分享”按钮。</b><span>在菜单中找到“添加到主屏幕”。</span></li><li><b>保留“作为网页 App 打开”，再点“添加”。</b><span>此开关如有显示，请保持开启；之后从主屏幕的 Ordrum 图标进入。</span></li></ol>')+(installPrompt ? '<button class="primary-button" data-pwa-action="native-install">'+phoneIcon+'安装到此设备</button>' : '')+'<div class="pwa-offline-status" role="status"><span class="pwa-status-dot '+(offlineReady ? 'ready' : '')+'"></span>'+status+'</div><h3>进度和账号</h3><p>主屏幕版与 Safari 的本地存储可能分开。请在手机和电脑的「设置 → 同步设置」中连接同一账号的同一个 GitHub 私有进度仓库；如需手动迁移，也可以在「设置 → 档案」导出、导入记录。</p><h3>离线与读音</h3><p>离线准备完成后，界面与词库可离线使用。读音会在联网播放时逐步缓存，离线只能使用已经缓存的部分；语音补读取决于系统。配置与跨设备同步需要联网。</p><p>iPhone 可能要求先点按一次播放按钮，才允许自动读音。若没有声音，请点单词旁的喇叭。设备也可能清理网页缓存，请保留重要记录的备份。</p><div class="dialog-actions"><button class="primary-button" data-pwa-action="close">继续学习</button></div></div>';
+  }
+  function renderInstallHelp(mount) {
+    mount.innerHTML = installMarkup().replace(/<div class="dialog-header">[\s\S]*?<\/div>/,'');
+    mount.onclick = event => {
+      const action = event.target.closest('[data-pwa-action]')?.dataset.pwaAction;
+      if (action === 'close') window.OrdrumSettings?.close();
+      if (action === 'native-install' && installPrompt) {
+        installPrompt.prompt();
+        installPrompt.userChoice.finally(() => { installPrompt = null; renderInstallHelp(mount); });
+      }
+    };
   }
   function makeBanner(id,message,buttonLabel,action) {
     let banner=byId(id);
@@ -49,6 +64,7 @@
       offlineReady=event.data.ready === true;
       channel.port1.close();
       if (byId('pwa-install-dialog')?.open) showInstallHelp();
+      if (byId('settings-dialog')?.open && byId('settings-panel-iphone')?.hidden === false) window.OrdrumSettings?.refresh('iphone');
     };
     worker.postMessage({type:'ORDRUM_CACHE_STATUS'},[channel.port2]);
   }
@@ -60,7 +76,7 @@
       retry();
     });
   }
-  window.OrdrumPWA={showInstallHelp,offerAudioStart,clearAudioStart:() => byId('pwa-audio-banner')?.remove()};
+  window.OrdrumPWA={showInstallHelp,renderInstallHelp,offerAudioStart,clearAudioStart:() => byId('pwa-audio-banner')?.remove()};
   byId('install-app-button')?.addEventListener('click',showInstallHelp);
   window.addEventListener('beforeinstallprompt',event => {event.preventDefault();installPrompt=event;});
   window.addEventListener('appinstalled',() => {installPrompt=null;byId('install-app-button')?.setAttribute('aria-label','App 使用说明');});

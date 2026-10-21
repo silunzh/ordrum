@@ -28,6 +28,12 @@
         const keyed = rows => Object.fromEntries((Array.isArray(rows) ? rows : []).filter(t => t && typeof t.id === 'string' && !['__proto__','constructor','prototype'].includes(t.id)).map(t => [t.id,t]));
         return Object.values(merge(keyed(b),keyed(l),keyed(r),'taskRecords'));
       }
+      if (/^notebookUnits\.[^.]+\.wordIds$/.test(path) && Array.isArray(l) && Array.isArray(r)) {
+        const combined = new Set([...l,...r]);
+        const prior = Array.isArray(b) ? b : [];
+        const existing = new Set(prior);
+        return [...prior.filter(id => combined.has(id)),...Array.from(combined).filter(id => !existing.has(id)).sort()];
+      }
       const session = /(?:^|\.)(?:session|studySession|reviewSession)$/.test(path);
       if (session) {
         if (b !== undefined && (l === null || r === null)) return null;

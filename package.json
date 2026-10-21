@@ -12,7 +12,7 @@
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "test": "node tests/frontend.test.cjs && node tests/study.test.cjs && node tests/server.test.cjs && node tests/cloud.test.cjs && node tests/github-sync.test.cjs && node tests/pwa.test.cjs && node tests/local-sync.test.cjs && node tests/sync-bridge.test.cjs && node tests/local-server.test.cjs && node tests/pages.test.cjs",
+    "test": "node tests/frontend.test.cjs && node tests/study.test.cjs && node tests/settings.test.cjs && node tests/server.test.cjs && node tests/cloud.test.cjs && node tests/github-sync.test.cjs && node tests/pwa.test.cjs && node tests/local-sync.test.cjs && node tests/sync-bridge.test.cjs && node tests/local-server.test.cjs && node tests/pages.test.cjs",
     "local": "node scripts/serve.cjs",
     "prebuild": "node scripts/version-pwa.cjs"
   },
