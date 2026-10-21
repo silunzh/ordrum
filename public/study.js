@@ -49,6 +49,39 @@
       return Number.isFinite(wrongAt) && wrongAt >= start.getTime() && wrongAt <= until;
     }).sort((a, b) => time(records[a].lastWrongAt) - time(records[b].lastWrongAt) || a.localeCompare(b));
   }
+  function notebookChapters(state, reference = new Date()) {
+    const collections = [['all', '全部错词'], ['today', '今天错词'], ['week', '本周错词']].map(([id, title]) => {
+      const wordIds = notebookCollectionIds(state, id, reference);
+      return {id, title, kind: 'collection', count: wordIds.length, wordIds};
+    });
+    const units = Object.values(cleanNotebookUnits(state.notebookUnits, state.notebook || {}))
+      .sort((a, b) => a.number - b.number || time(a.createdAt) - time(b.createdAt) || a.id.localeCompare(b.id));
+    return [...collections, ...units.map(unit => ({id: unit.id, title: unit.name, kind: 'unit', number: unit.number, count: unit.wordIds.length, wordIds: unit.wordIds.slice()}))];
+  }
+  function notebookChapterSelection(state, selection = state.selectedNotebookChapters) {
+    const valid = new Set(notebookChapters(state).map(chapter => chapter.id));
+    if (!Array.isArray(selection)) return ['all'];
+    const selected = unique(selection.filter(id => typeof id === 'string' && valid.has(id)));
+    // An intentionally empty selection stays empty; deleted saved chapters fall back to All.
+    return selection.length && !selected.length ? ['all'] : selected;
+  }
+  function notebookSelectedIds(state, selection = state.selectedNotebookChapters, reference = new Date()) {
+    const chosen = new Set(notebookChapterSelection(state, selection));
+    return unique(notebookChapters(state, reference).filter(chapter => chosen.has(chapter.id)).flatMap(chapter => chapter.wordIds));
+  }
+  function renameNotebookUnit(state, id, name, reference = new Date()) {
+    const unit = own(state.notebookUnits || {}, id) ? state.notebookUnits[id] : null;
+    const next = short(name, 80).trim();
+    if (!unit || !next || next === unit.name) return false;
+    unit.name = next; unit.updatedAt = new Date(reference).toISOString();
+    return true;
+  }
+  function deleteNotebookUnit(state, id) {
+    if (!own(state.notebookUnits || {}, id)) return false;
+    delete state.notebookUnits[id];
+    state.selectedNotebookChapters = notebookChapterSelection(state);
+    return true;
+  }
   function cleanNotebookUnits(units, notebook) {
     const result = {}, assigned = new Set(), usedNumbers = new Set();
     if (!object(units)) return result;
@@ -126,7 +159,7 @@
     });
     const result = object(session.dictationResult) && ['correct', 'wrong', 'revealed'].includes(session.dictationResult.status)
       ? {status: session.dictationResult.status, input: short(session.dictationResult.input)} : null;
-    return {
+    const clean = {
       deck, flashIndex: index(session.flashIndex), flipped: !!session.flipped,
       dictationIndex: index(session.dictationIndex), dictationResult: result, dictationAnswers: answers,
       mistakes: unique((Array.isArray(session.mistakes) ? session.mistakes : []).filter(id => safeId(id) && deckIds.has(id))),
@@ -136,6 +169,11 @@
       chapterIds: unique((Array.isArray(session.chapterIds) ? session.chapterIds : []).map(Number).filter(id => Number.isInteger(id) && id > 0)),
       updatedAt: stamp(session.updatedAt) || '1970-01-01T00:00:00.000Z',
     };
+    if (safeId(session.reviewSessionId)) clean.reviewSessionId = session.reviewSessionId;
+    if (session.bookId === '__notebook__' || safeId(session.bookId)) clean.bookId = session.bookId;
+    if (Array.isArray(session.notebookChapterIds)) clean.notebookChapterIds = unique(session.notebookChapterIds.filter(safeId)).slice(0, 200);
+    if (session.planKind === 'today') clean.planKind = 'today';
+    return clean;
   }
   function cleanTaskSession(session, validIds) {
     if (object(session) && own(session, 'main')) {
@@ -154,9 +192,10 @@
     return sanitiseSession(review, validIds);
   }
   function createTask(book, chapterIds, words, name) {
-    const chapters = unique((Array.isArray(chapterIds) ? chapterIds : []).map(Number).filter(Number.isInteger));
+    const notebook = book?.id === '__notebook__';
+    const chapters = unique(notebook ? (Array.isArray(chapterIds) ? chapterIds : []).filter(safeId) : (Array.isArray(chapterIds) ? chapterIds : []).map(Number).filter(Number.isInteger));
     const chosen = new Set(chapters);
-    const wordIds = unique((Array.isArray(words) ? words : []).filter(word => word && safeId(word.id) && chosen.has(Number(word.chapter))).map(word => word.id));
+    const wordIds = unique((Array.isArray(words) ? words : []).filter(word => word && safeId(word.id) && (notebook || chosen.has(Number(word.chapter)))).map(word => word.id));
     const createdAt = now();
     const random = global.crypto?.randomUUID ? global.crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     return {id: `task-${random}`, name: short(name, 100).trim() || `学习任务 ${new Date().toLocaleDateString('zh-CN')}`, bookId: short(book?.id, 160), chapterIds: chapters, wordIds, createdAt, updatedAt: createdAt, status: 'active', marks: {}, errors: {}, session: null};
@@ -179,11 +218,12 @@
     state.marks = cleanMarks(state.marks, validIds);
     const byId = new Map();
     (Array.isArray(state.tasks) ? state.tasks : []).forEach(task => {
-      if (!object(task) || !safeId(task.id) || (task.bookId && task.bookId !== data?.book?.id)) return;
+      if (!object(task) || !safeId(task.id) || (task.bookId && task.bookId !== '__notebook__' && task.bookId !== data?.book?.id)) return;
       const ids = unique((Array.isArray(task.wordIds) ? task.wordIds : []).filter(id => safeId(id) && validIds.has(id)));
       const taskIds = new Set(ids);
-      const clean = {id: task.id, name: short(task.name, 100).trim() || '未命名任务', bookId: data?.book?.id || short(task.bookId, 160),
-        chapterIds: unique((Array.isArray(task.chapterIds) ? task.chapterIds : []).map(Number).filter(id => chapters.has(id))),
+      const notebook = task.bookId === '__notebook__';
+      const clean = {id: task.id, name: short(task.name, 100).trim() || '未命名任务', bookId: notebook ? '__notebook__' : data?.book?.id || short(task.bookId, 160),
+        chapterIds: unique(notebook ? (Array.isArray(task.chapterIds) ? task.chapterIds : []).filter(safeId) : (Array.isArray(task.chapterIds) ? task.chapterIds : []).map(Number).filter(id => chapters.has(id))),
         wordIds: ids, createdAt: stamp(task.createdAt) || '1970-01-01T00:00:00.000Z', updatedAt: stamp(task.updatedAt) || stamp(task.createdAt) || '1970-01-01T00:00:00.000Z',
         status: task.status === 'archived' ? 'archived' : 'active', marks: cleanMarks(task.marks, taskIds), errors: cleanErrors(task.errors, taskIds), session: cleanTaskSession(task.session, taskIds)};
       if (!byId.has(clean.id) || time(clean.updatedAt) >= time(byId.get(clean.id).updatedAt)) byId.set(clean.id, clean);
@@ -195,6 +235,8 @@
       if (mark.status === 'review') state.notebook[id] = {wordId: id, count: 0, lastWrongAt: null, lastAnswer: '', status: 'pending', taskIds: []};
     });
     state.notebookUnits = cleanNotebookUnits(state.notebookUnits, state.notebook);
+    state.selectedBook = state.selectedBook === '__notebook__' ? '__notebook__' : data?.book?.id || null;
+    state.selectedNotebookChapters = notebookChapterSelection(state);
     state.tasks.forEach(task => Object.values(task.errors).forEach(row => { row.taskIds = [task.id]; }));
     const active = getTask(state, state.activeTaskId);
     state.activeTaskId = active && active.status !== 'archived' ? active.id : null;
@@ -271,7 +313,7 @@
     if (!state.activeTaskId && imported.activeTaskId) state.activeTaskId = imported.activeTaskId;
     return normalise(state, data);
   }
-  const core = {normalise, createTask, getTask, taskProgress, recordResult, sanitiseSession, merge, notebookCollectionIds, organiseNotebook};
+  const core = {normalise, createTask, getTask, taskProgress, recordResult, sanitiseSession, merge, notebookCollectionIds, organiseNotebook, notebookChapters, notebookChapterSelection, notebookSelectedIds, renameNotebookUnit, deleteNotebookUnit};
   global.OrdrumStudy = core;
 
   let taskFilter = 'active';
@@ -279,6 +321,17 @@
   let notebookPage = 1;
   const notebookSelection = new Set();
   let dialogView = null;
+  let notebookChanged = null;
+  function configure(options = {}) { notebookChanged = typeof options.onNotebookChange === 'function' ? options.onNotebookChange : null; }
+  function publishNotebookChange() {
+    save();
+    if (notebookChanged) notebookChanged();
+    else {
+      renderNotebookShelf();
+      if (typeof renderSummary === 'function') renderSummary();
+      if (typeof renderMode === 'function') renderMode({autoplay: false});
+    }
+  }
   const PAGE = 30;
   const query = selector => document.querySelector(selector);
   const action = (name, label, id = '', cls = 'study-small-button', accessibleName = '') => `<button type="button" class="${cls}" data-action="study-${name}"${id ? ` data-id="${esc(id)}"` : ''}${accessibleName ? ` aria-label="${esc(accessibleName)}"` : ''}>${label}</button>`;
@@ -329,10 +382,16 @@
     dialog.scrollLeft = saved.scrollLeft;
   }
   function taskBadge(task) { const p = pct(task); return task.status === 'archived' ? '已归档' : p.total && p.known === p.total ? '已完成' : '学习中'; }
+  function taskScopeLabel(task) {
+    if (task.bookId !== '__notebook__') return task.chapterIds.length === data.chapters.length ? '全书' : `第 ${task.chapterIds.join('、')} 章`;
+    const labels = new Map(notebookChapters(state).map(chapter => [chapter.id, chapter.title]));
+    return `错题本 · ${task.chapterIds.includes('all') ? '全部错词' : task.chapterIds.map(id => labels.get(id) || '已保存错词单元').join('、') || '已保存的错词'}`;
+  }
   function contextRefresh() { save(); renderContext(); }
   function renderContext() {
     const holder = query('#task-context');
     if (!holder || !data) return;
+    if (state.reviewSession?.session?.planKind === 'today') { holder.innerHTML = ''; return; }
     if (state.reviewSession) {
       holder.innerHTML = `<div class="study-context study-context-review"><div><span class="study-context-eyebrow">错题复习</span><strong>把不熟悉的词，再记牢一点</strong><span>复习结束后，可以返回原来的学习位置。</span></div>${action('return-study', '返回原学习进度', '', 'secondary-button')}</div>`;
       return;
@@ -347,17 +406,20 @@
     const tasks = (state.tasks || []).filter(task => taskFilter === 'all' || task.status === taskFilter).slice().sort((a, b) => time(b.updatedAt) - time(a.updatedAt));
     const rows = tasks.map(task => {
       const p = pct(task);
-      return `<article class="study-task-card"><div class="study-task-heading"><div><span class="study-badge ${task.status === 'archived' ? 'is-muted' : ''}">${esc(taskBadge(task))}${task.id === state.activeTaskId ? ' · 当前' : ''}</span><h3>${esc(task.name)}</h3></div><span class="study-card-date">${esc(dateLabel(task.updatedAt))}</span></div><p>${task.chapterIds.length === data.chapters.length ? '全书' : `第 ${task.chapterIds.join('、')} 章`} · ${p.total} 张卡片</p><div class="study-task-stats"><span>已学 <b>${p.studied}</b></span><span>已掌握 <b>${p.known}</b></span><span>待复习 <b>${p.mistakes}</b></span><span>${p.percent}%</span></div><div class="study-progress-track"><span style="width:${p.percent}%"></span></div><div class="study-task-actions">${task.status !== 'archived' ? action('activate-task', task.session ? '继续学习' : '开始学习', task.id, 'primary-button') : action('restore-task', '恢复任务', task.id, 'secondary-button')}${action('rename-task', '重命名', task.id)}${task.status !== 'archived' ? action('archive-task', '归档', task.id) : ''}${action('reset-task', '重置进度', task.id)}${action('delete-task', '删除', task.id, 'study-small-button study-danger')}</div></article>`;
+      return `<article class="study-task-card"><div class="study-task-heading"><div><span class="study-badge ${task.status === 'archived' ? 'is-muted' : ''}">${esc(taskBadge(task))}${task.id === state.activeTaskId ? ' · 当前' : ''}</span><h3>${esc(task.name)}</h3></div><span class="study-card-date">${esc(dateLabel(task.updatedAt))}</span></div><p>${esc(taskScopeLabel(task))} · ${p.total} 张卡片</p><div class="study-task-stats"><span>已学 <b>${p.studied}</b></span><span>已掌握 <b>${p.known}</b></span><span>待复习 <b>${p.mistakes}</b></span><span>${p.percent}%</span></div><div class="study-progress-track"><span style="width:${p.percent}%"></span></div><div class="study-task-actions">${task.status !== 'archived' ? action('activate-task', task.session ? '继续学习' : '开始学习', task.id, 'primary-button') : action('restore-task', '恢复任务', task.id, 'secondary-button')}${action('rename-task', '重命名', task.id)}${task.status !== 'archived' ? action('archive-task', '归档', task.id) : ''}${action('reset-task', '重置进度', task.id)}${action('delete-task', '删除', task.id, 'study-small-button study-danger')}</div></article>`;
     }).join('');
     openDialog('我的学习任务', `<div class="study-dialog"><div class="study-dialog-intro"><p>每个任务单独记录学习位置和掌握进度，随时继续。</p>${action('create-task', '＋ 新建任务', '', 'primary-button')}</div><div class="study-filter-tabs" aria-label="任务筛选">${[['active', '进行中'], ['archived', '已归档'], ['all', '全部']].map(([id, text]) => `<button class="${taskFilter === id ? 'active' : ''}" data-action="study-task-filter" data-value="${id}">${text}</button>`).join('')}</div><div class="study-task-list">${rows || '<div class="study-empty">这里还没有学习任务。可以从已选章节或全书新建一个。</div>'}</div></div>`);
     dialogView = 'tasks';
   }
   function showCreateTask() {
     if (!data) return;
-    const chapters = state.selectedChapters || [];
+    const notebook = state.selectedBook === '__notebook__';
+    const chapters = notebook ? notebookChapterSelection(state) : state.selectedChapters || [];
     const selected = new Set(chapters);
-    const count = data.words.filter(word => selected.has(Number(word.chapter))).length;
-    openDialog('新建学习任务', `<form id="study-create-form" class="study-dialog"><p>选择本次要学的内容。之后可在任务列表继续，并保留自己的进度。</p><label for="study-task-name">任务名称</label><input id="study-task-name" maxlength="100" placeholder="例如：第一周 · 第 1–3 章" required value="${esc(count ? `第 ${chapters.join('、')} 章` : '全书学习')}"><fieldset class="study-scope-options"><legend>学习范围</legend><label class="study-scope-option ${count ? '' : 'is-disabled'}"><input type="radio" name="study-scope" value="selected" ${count ? 'checked' : 'disabled'}><span><b>当前已选章节</b><small>${count ? `第 ${chapters.join('、')} 章 · ${count} 张卡片` : '请先在左侧选择章节'}</small></span></label><label class="study-scope-option"><input type="radio" name="study-scope" value="all" ${count ? '' : 'checked'}><span><b>整本书</b><small>${data.chapters.length} 章 · ${data.words.length} 张卡片</small></span></label></fieldset><div class="dialog-actions">${action('tasks', '返回任务列表', '', 'secondary-button')}<button class="primary-button" type="submit">创建并开始</button></div></form>`);
+    const count = notebook ? notebookSelectedIds(state, chapters).length : data.words.filter(word => selected.has(Number(word.chapter))).length;
+    const labels = notebook ? notebookChapters(state).filter(chapter => selected.has(chapter.id)).map(chapter => chapter.title).join('、') : `第 ${chapters.join('、')} 章`;
+    const total = notebook ? notebookCollectionIds(state).length : data.words.length;
+    openDialog('新建学习任务', `<form id="study-create-form" class="study-dialog" data-book="${notebook ? '__notebook__' : esc(data.book.id)}"><p>任务保留创建时的词条范围，独立记录学习进度。</p><label for="study-task-name">任务名称</label><input id="study-task-name" maxlength="100" placeholder="例如：第一周复习" required value="${esc(count ? notebook ? `错题本 · ${labels}` : labels : notebook ? '错题本复习' : '全书学习')}"><fieldset class="study-scope-options"><legend>学习范围</legend><label class="study-scope-option ${count ? '' : 'is-disabled'}"><input type="radio" name="study-scope" value="selected" ${count ? 'checked' : 'disabled'}><span><b>当前已选${notebook ? '错词章节' : '章节'}</b><small>${count ? `${esc(labels)} · ${count} 张卡片` : '请先在书架选择章节'}</small></span></label><label class="study-scope-option"><input type="radio" name="study-scope" value="all" ${count ? '' : 'checked'}><span><b>${notebook ? '整本错题本' : '整本书'}</b><small>${notebook ? '当前全部错词' : `${data.chapters.length} 章`} · ${total} 张卡片</small></span></label></fieldset><div class="dialog-actions">${action('tasks', '返回任务列表', '', 'secondary-button')}<button class="primary-button" type="submit">创建并开始</button></div></form>`);
     query('#study-task-name')?.focus();
   }
   function renameTask(id) {
@@ -388,6 +450,12 @@
       select.innerHTML = options.map(([value, text]) => `<option value="${esc(value)}">${esc(text)}</option>`).join('');
     }
     if (select) select.value = notebookFilter.collection;
+    const actions = query('#study-notebook-unit-actions');
+    if (actions) {
+      const unit = state.notebookUnits?.[notebookFilter.collection];
+      const markup = unit ? `${action('notebook-rename-unit', '重命名单元', unit.id)}${action('notebook-delete-unit', '删除单元', unit.id, 'study-small-button study-danger')}` : '';
+      if (actions.innerHTML !== markup) actions.innerHTML = markup;
+    }
   }
   function renderNotebookShelf() {
     const holder = query('#notebook-shelf'); if (!holder || !data) return;
@@ -429,9 +497,10 @@
     openDialog('错题本', `<div class="study-dialog">
       <p id="study-notebook-summary"></p>
       <div class="study-notebook-organize"><div><strong>整理错词单元</strong><p>每单元最多 30 词；已分组的词保留原单元。</p></div><div class="study-organize-actions">${action('notebook-organize', '整理今天错词', 'today')}${action('notebook-organize', '整理本周错词', 'week')}${action('notebook-organize', '整理全部错词', 'all')}</div></div>
-      <div class="study-notebook-collection-bar"><label>分类<select id="study-notebook-collection">${notebookCollectionOptions().map(([id, label]) => `<option value="${esc(id)}" ${notebookFilter.collection === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>${action('notebook-retry-list', '重练当前列表', '', 'secondary-button')}</div>
+      <div class="study-notebook-collection-bar"><label>错词章节<select id="study-notebook-collection">${notebookCollectionOptions().map(([id, label]) => `<option value="${esc(id)}" ${notebookFilter.collection === id ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>${action('notebook-retry-list', '重练当前列表', '', 'secondary-button')}</div>
+      <div id="study-notebook-unit-actions" class="study-notebook-unit-actions"></div>
       <p class="study-notebook-date-hint">按本机日期和最近答错时间分类，周一开始。无日期记录见“全部错词”；已掌握的错词仍可查看。</p>
-      <div class="study-notebook-filters"><label>任务<select id="study-notebook-task"><option value="all">全部任务</option><option value="free">自由学习</option>${(state.tasks || []).map(task => `<option value="${esc(task.id)}" ${notebookFilter.task === task.id ? 'selected' : ''}>${esc(task.name)}</option>`).join('')}</select></label><label>章节<select id="study-notebook-chapter"><option value="all">全部章节</option>${data.chapters.map(chapter => `<option value="${Number(chapter.id)}" ${Number(notebookFilter.chapter) === Number(chapter.id) ? 'selected' : ''}>第 ${Number(chapter.id)} 章</option>`).join('')}</select></label><label>状态<select id="study-notebook-status">${[['pending', '待复习'], ['mastered', '已掌握'], ['all', '全部状态']].map(([id, text]) => `<option value="${id}" ${notebookFilter.status === id ? 'selected' : ''}>${text}</option>`).join('')}</select></label></div>
+      <div class="study-notebook-filters"><label>任务<select id="study-notebook-task"><option value="all">全部任务</option><option value="free">自由学习</option>${(state.tasks || []).map(task => `<option value="${esc(task.id)}" ${notebookFilter.task === task.id ? 'selected' : ''}>${esc(task.name)}</option>`).join('')}</select></label><label>原书章节<select id="study-notebook-chapter"><option value="all">全部章节</option>${data.chapters.map(chapter => `<option value="${Number(chapter.id)}" ${Number(notebookFilter.chapter) === Number(chapter.id) ? 'selected' : ''}>第 ${Number(chapter.id)} 章</option>`).join('')}</select></label><label>状态<select id="study-notebook-status">${[['pending', '待复习'], ['mastered', '已掌握'], ['all', '全部状态']].map(([id, text]) => `<option value="${id}" ${notebookFilter.status === id ? 'selected' : ''}>${text}</option>`).join('')}</select></label></div>
       <label class="sr-only" for="study-notebook-search">搜索错题本</label><input id="study-notebook-search" type="search" placeholder="搜索瑞典语、英文或上次答案…" value="${esc(notebookFilter.search)}"><div id="study-notebook-results"></div></div>`);
     query('#study-notebook-task').value = notebookFilter.task;
     query('#study-notebook-chapter').value = notebookFilter.chapter;
@@ -460,9 +529,18 @@
   function selectedNotebookIds() { return Array.from(notebookSelection).filter(id => own(state.notebook || {}, id)); }
   function organiseNotebookCollection(collection) {
     const result = organiseNotebook(state, collection);
-    if (result.added) { save(); renderNotebookShelf(); }
+    if (result.added) publishNotebookChange();
     renderNotebookResults();
     notify(result.added ? `已整理 ${result.added} 个错词，新增 ${result.created} 个单元。` : `${notebookCollectionLabel(collection)}没有尚未分组的词。`);
+  }
+  function renameNotebookUnitForm(id) {
+    const unit = state.notebookUnits?.[id]; if (!unit) return;
+    openDialog('重命名错词单元', `<form id="study-notebook-rename-form" data-id="${esc(id)}"><label for="study-unit-name">单元名称</label><input id="study-unit-name" maxlength="80" required value="${esc(unit.name)}"><div class="dialog-actions">${action('notebook-open', '取消', id, 'secondary-button')}<button class="primary-button" type="submit">保存名称</button></div></form>`);
+    query('#study-unit-name')?.focus();
+  }
+  function confirmNotebookUnitDelete(id) {
+    const unit = state.notebookUnits?.[id]; if (!unit) return;
+    openDialog('删除错词单元', `<p>删除「${esc(unit.name)}」这个分组？其中 ${unit.wordIds.length} 个错词及学习记录会保留在错题本，可重新整理。</p><div class="dialog-actions">${action('notebook-open', '取消', id, 'secondary-button')}${action('notebook-confirm-delete-unit', '删除分组', id, 'primary-button study-danger-solid')}</div>`);
   }
   function notebookBatch(kind) {
     const ids = selectedNotebookIds(); if (!ids.length) { notify('先选择要操作的词条。'); return; }
@@ -499,12 +577,11 @@
       });
     });
     state.notebookUnits = cleanNotebookUnits(state.notebookUnits, state.notebook);
-    notebookSelection.clear(); contextRefresh();
-    if (typeof renderSummary === 'function') renderSummary();
-    if (typeof renderMode === 'function') renderMode({autoplay: false});
+    state.selectedNotebookChapters = notebookChapterSelection(state);
+    notebookSelection.clear(); publishNotebookChange(); renderContext();
     notify(kind === 'delete' ? '所选词条已从错题本移除。' : '所选错题已标为掌握。');
   }
-  global.OrdrumStudyUI = {showTasks, showCreateTask, showNotebook, renderContext, renderNotebookShelf, dialogChanged, captureDialogState, refreshOpenDialog};
+  global.OrdrumStudyUI = {configure, showTasks, showCreateTask, showNotebook, renderContext, renderNotebookShelf, dialogChanged, captureDialogState, refreshOpenDialog};
   if (typeof document === 'undefined' || !document.addEventListener) return;
   document.addEventListener('click', event => {
     const button = event.target.closest?.('[data-action]');
@@ -517,6 +594,12 @@
       case 'notebook': showNotebook(); break;
       case 'notebook-open': showNotebook({collection: id}); break;
       case 'notebook-organize': organiseNotebookCollection(['today', 'week'].includes(id) ? id : 'all'); break;
+      case 'notebook-rename-unit': renameNotebookUnitForm(id); break;
+      case 'notebook-delete-unit': confirmNotebookUnitDelete(id); break;
+      case 'notebook-confirm-delete-unit': {
+        if (deleteNotebookUnit(state, id)) { publishNotebookChange(); notify('错词单元已删除；词条和学习记录已保留。'); }
+        showNotebook({collection: 'all'}); break;
+      }
       case 'notebook-retry-list': {
         const ids = notebookRows().map(({row}) => row.wordId);
         if (ids.length) { closeDialog(); startNotebookReview(ids, ['all', 'free'].includes(notebookFilter.task) ? null : notebookFilter.task); }
@@ -543,14 +626,22 @@
     }
   });
   document.addEventListener('submit', event => {
-    if (!['study-create-form', 'study-rename-form'].includes(event.target.id) || !data) return;
+    if (!['study-create-form', 'study-rename-form', 'study-notebook-rename-form'].includes(event.target.id) || !data) return;
     event.preventDefault();
+    if (event.target.id === 'study-notebook-rename-form') {
+      const input = query('#study-unit-name'), name = input.value.trim(), id = event.target.dataset.id;
+      if (!name) { input.focus(); return; }
+      if (renameNotebookUnit(state, id, name)) publishNotebookChange();
+      showNotebook({unitId: id}); return;
+    }
     const name = query('#study-task-name').value.trim();
     if (!name) { query('#study-task-name').focus(); return; }
     if (event.target.id === 'study-create-form') {
       const scope = query('input[name="study-scope"]:checked')?.value;
-      const chapters = scope === 'all' ? data.chapters.map(chapter => Number(chapter.id)) : state.selectedChapters || [];
-      const task = createTask(data.book, chapters, data.words, name);
+      const notebook = event.target.dataset?.book === '__notebook__';
+      const chapters = notebook ? scope === 'all' ? ['all'] : notebookChapterSelection(state) : scope === 'all' ? data.chapters.map(chapter => Number(chapter.id)) : state.selectedChapters || [];
+      const chosen = notebook ? new Set(notebookSelectedIds(state, chapters)) : null;
+      const task = createTask(notebook ? {id: '__notebook__'} : data.book, chapters, notebook ? data.words.filter(word => chosen.has(word.id)) : data.words, name);
       if (!task.wordIds.length) { notify('请先选择至少一个章节。'); return; }
       if (!Array.isArray(state.tasks)) state.tasks = [];
       state.tasks.push(task); save(); closeDialog(); activateStudyTask(task.id);

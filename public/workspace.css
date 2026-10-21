@@ -1,5 +1,9 @@
 /* Compact study workspace. Keep all controls; use shared theme colors. */
 :root{--muted:#647267}
+.notebook-manage-book{margin-top:10px;width:100%;font-size:12px;min-height:40px}
+.notebook-manage-book[hidden]{display:none}
+.flash-definition{width:min(100%,500px)}
+#today-plan[hidden]{display:none}
 .app-shell{max-width:1480px;padding:0 36px}
 .site-header{height:82px;min-height:0;flex-wrap:nowrap;padding:0}
 .brand{font-size:29px;gap:10px}

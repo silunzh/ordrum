@@ -351,5 +351,73 @@ test('concurrent unit number collisions get stable new numbers without renumberi
   assert.equal(Object.keys(reloaded.notebook).length,5);
 });
 
+test('notebook chapter descriptors expose dated collections and stable named units without mutating history',()=>{
+  const state=mistakeState(31), reference=new Date('2026-10-21T12:00:00Z');core.organiseNotebook(state,'all',reference);
+  const first=Object.values(state.notebookUnits)[0];core.renameNotebookUnit(state,first.id,'我的难词',reference);
+  const before=clone(state), chapters=core.notebookChapters(state,reference);
+  assert.deepEqual(plain(chapters.slice(0,3).map(chapter=>chapter.id)),['all','today','week']);
+  assert.equal(chapters[0].count,31);assert.equal(chapters[1].count,31);
+  assert.equal(chapters[3].title,'我的难词');assert.equal(chapters[3].kind,'unit');assert.equal(chapters[3].count,30);
+  assert.deepEqual(plain(state),before);
+  chapters[3].wordIds.pop();assert.equal(state.notebookUnits[first.id].wordIds.length,30);
+});
+test('selected notebook chapters union overlapping collections once and ignore invalid IDs',()=>{
+  const state=mistakeState(31), reference=new Date('2026-10-21T12:00:00Z');core.organiseNotebook(state,'all',reference);
+  const unitId=Object.keys(state.notebookUnits)[0];
+  assert.equal(core.notebookSelectedIds(state,['all','today',unitId,'missing'],reference).length,31);
+  assert.deepEqual(plain(core.notebookSelectedIds(state,[],reference)),[]);
+  assert.deepEqual(plain(core.notebookChapterSelection(state,['missing','constructor'])),['all']);
+});
+test('notebook book and selected chapter IDs survive reload independently of Rivstart chapters',()=>{
+  const state=mistakeState(31);core.organiseNotebook(state,'all');
+  const id=Object.keys(state.notebookUnits)[0];state.selectedBook='__notebook__';state.selectedChapters=[2];state.selectedNotebookChapters=[id,'missing',id];
+  const restored=core.normalise(clone(state),manyData);
+  assert.equal(restored.selectedBook,'__notebook__');assert.deepEqual(plain(restored.selectedChapters),[2]);
+  assert.deepEqual(plain(restored.selectedNotebookChapters),[id]);
+  restored.selectedNotebookChapters=[];assert.deepEqual(plain(core.normalise(restored,manyData).selectedNotebookChapters),[]);
+});
+test('renaming a notebook unit changes only its label and update time',()=>{
+  const state=mistakeState(2);core.organiseNotebook(state,'all');const id=Object.keys(state.notebookUnits)[0];
+  const before=clone(state), when=new Date('2026-10-22T12:00:00Z');
+  assert.equal(core.renameNotebookUnit(state,id,'  课堂复习  ',when),true);
+  assert.equal(state.notebookUnits[id].name,'课堂复习');assert.equal(state.notebookUnits[id].updatedAt,when.toISOString());
+  assert.deepEqual(plain(state.notebookUnits[id].wordIds),before.notebookUnits[id].wordIds);
+  assert.deepEqual(plain(state.notebook),before.notebook);
+  assert.equal(core.renameNotebookUnit(state,id,'   ',when),false);assert.equal(core.renameNotebookUnit(state,'all','title',when),false);
+});
+test('deleting a selected unit preserves errors, mastery and task records and falls back to All',()=>{
+  const state=mistakeState(31);core.organiseNotebook(state,'all');const id=Object.keys(state.notebookUnits)[0];
+  state.selectedNotebookChapters=[id];state.marks['word-01']={status:'known'};
+  const snapshot=clone({notebook:state.notebook,marks:state.marks,tasks:state.tasks});
+  assert.equal(core.deleteNotebookUnit(state,id),true);assert.equal(state.notebookUnits[id],undefined);
+  assert.deepEqual(plain(state.selectedNotebookChapters),['all']);
+  assert.deepEqual(plain({notebook:state.notebook,marks:state.marks,tasks:state.tasks}),snapshot);
+  assert.equal(core.notebookCollectionIds(state).length,31);assert.equal(core.organiseNotebook(state,'all').added,30);
+});
+test('deleting a unit retains other selected notebook chapters and rejects built-in collections',()=>{
+  const state=mistakeState(31);core.organiseNotebook(state,'all');const units=Object.keys(state.notebookUnits);
+  state.selectedNotebookChapters=[units[0],units[1],'today'];
+  assert.equal(core.deleteNotebookUnit(state,units[0]),true);
+  assert.deepEqual(plain(state.selectedNotebookChapters),[units[1],'today']);
+  assert.equal(core.deleteNotebookUnit(state,'today'),false);assert.equal(core.deleteNotebookUnit(state,'constructor'),false);
+});
+test('tasks from notebook chapters preserve a frozen scope through reload and later unit deletion',()=>{
+  const state=mistakeState(31);core.organiseNotebook(state,'all');const unit=Object.values(state.notebookUnits)[0];
+  const chosen=new Set(core.notebookSelectedIds(state,[unit.id]));
+  const created=core.createTask({id:'__notebook__'},[unit.id],manyData.words.filter(word=>chosen.has(word.id)),'错词任务');
+  state.tasks.push(created);state.activeTaskId=created.id;core.deleteNotebookUnit(state,unit.id);
+  const restored=core.normalise(clone(state),manyData), saved=core.getTask(restored);
+  assert.equal(saved.bookId,'__notebook__');assert.deepEqual(plain(saved.chapterIds),[unit.id]);
+  assert.equal(saved.wordIds.length,30);assert.deepEqual(plain(saved.wordIds),plain(unit.wordIds));
+});
+test('saved review session metadata is bounded and retains notebook scope and first-attempt identity',()=>{
+  const session=core.sanitiseSession({deck:['barn'],bookId:'__notebook__',notebookChapterIds:['today','today','unit-one','constructor'],planKind:'today',reviewSessionId:'session-abc'},[...ids]);
+  assert.equal(session.bookId,'__notebook__');assert.deepEqual(plain(session.notebookChapterIds),['today','unit-one']);
+  assert.equal(session.planKind,'today');assert.equal(session.reviewSessionId,'session-abc');
+  const invalid=core.sanitiseSession({deck:['barn'],bookId:'bad input',notebookChapterIds:['bad input'],planKind:'unknown',reviewSessionId:'bad input'},[...ids]);
+  assert.equal(invalid.bookId,undefined);assert.deepEqual(plain(invalid.notebookChapterIds),[]);
+  assert.equal(invalid.planKind,undefined);assert.equal(invalid.reviewSessionId,undefined);
+});
+
 console.log(`\n${passed} study checks passed${failed?`, ${failed} failed`:''}.`);
 if(failed)process.exitCode=1;

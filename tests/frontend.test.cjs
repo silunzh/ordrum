@@ -79,8 +79,9 @@ const sandbox = {
   setTimeout(fn){timers.push(fn);return timers.length;},clearTimeout(){},
   URL:{createObjectURL(blob){blobs.push(blob);return 'blob:test';},revokeObjectURL(){}},
 };
+sandbox.window.localStorage = sandbox.localStorage;
 vm.createContext(sandbox);
-for (const name of ['study.js','session.js','cloud.js']) {
+for (const name of ['study.js','review.js','session.js','cloud.js','sync-health.js']) {
   const modulePath=path.resolve(__dirname,'../public',name);
   vm.runInContext(fs.readFileSync(modulePath,'utf8'),sandbox,{filename:modulePath});
 }
@@ -476,6 +477,7 @@ test('noun form order remains exactly as the dictionary or user supplied it',()=
   run(`state={selectedChapters:[1],mode:'preview',layout:'grid',marks:{yr:{status:'review'}},overrides:{},rate:0.7,autoPlay:false,voiceURI:''};currentDeck=[];flashIndex=0;dictationIndex=0;dictationResult=null;dictationAnswers={};mistakes=new Set();retryMode=false;dictationDraft='';`);
   sandbox.backupFile = {size:Buffer.byteLength(backupText),text:async () => backupText};
   await run('importProgress(backupFile)');
+  if (run('pendingRestore !== null')) run('commitRestore()');
   test('import restores selected chapters',() => assert.deepEqual(json('state.selectedChapters'),[1,2]));
   test('import restores known mark',() => assert.equal(run('markStatus("bomull")'),'known'));
   test('import merges existing marks',() => assert.equal(run('markStatus("yr")'),'review'));
@@ -486,6 +488,7 @@ test('noun form order remains exactly as the dictionary or user supplied it',()=
   const before = json('state');
   sandbox.backupFile = {size:50,text:async () => JSON.stringify({app:'other',version:1,state:{selectedChapters:[]}})};
   await run('importProgress(backupFile)');
+  if (run('pendingRestore !== null')) run('commitRestore()');
   test('invalid backup leaves progress intact',() => assert.deepEqual(json('state'),before));
 function resetStudyFixture() {
   run(`state={selectedChapters:[1,2],mode:'dictation',layout:'grid',marks:{},overrides:{},rate:0.85,autoPlay:false,voiceURI:''};StudyCore.normalise(state,data);resetDeck();dictationDraft='';`);
@@ -494,8 +497,9 @@ function resetStudyFixture() {
 }
 function browserReload() {
   const reloaded={...sandbox,document:{...document,addEventListener(){}},window:{addEventListener(){}},speechCalls:[]};
+  reloaded.window.localStorage = reloaded.localStorage;
   vm.createContext(reloaded);
-  for(const name of ['study.js','session.js','cloud.js','app.js']) {
+  for(const name of ['study.js','review.js','session.js','cloud.js','sync-health.js','app.js']) {
     const modulePath=path.resolve(__dirname,'../public',name);
     const code=fs.readFileSync(modulePath,'utf8').replace(/\ninit\(\);\s*$/,'\n');
     vm.runInContext(code,reloaded,{filename:modulePath});
@@ -683,6 +687,7 @@ test('deleting a task retains its wrong words and removes its notebook associati
   const localTaskId=run('state.activeTaskId');
   sandbox.backupFile={size:Buffer.byteLength(taskBackupText),text:async()=>taskBackupText};
   await run('importProgress(backupFile)');
+  if (run('pendingRestore !== null')) run('commitRestore()');
   test('v1 backup import merges tasks and notebook while preserving the current task checkpoint',()=>{
     assert.equal(run('state.tasks.length'),2);
     assert.equal(run('state.activeTaskId'),localTaskId);
@@ -783,10 +788,10 @@ test('deleting a task retains its wrong words and removes its notebook associati
   test('bookshelf date categories include mastered wrong words and keep undated records in all words',()=>{
     resetStudyFixture();
     run(`recordStudyResult('bomull','wrong','bom');recordStudyResult('bomull','correct','bomull');recordStudyResult('kaffe','wrong','ka');recordStudyResult('yr','wrong','y');recordStudyResult('skal','revealed');state.notebook.yr.lastWrongAt='2000-01-01T00:00:00.000Z';renderSummary()`);
-    const shelf=lookup('#notebook-shelf').innerHTML;
-    assert.match(shelf,/4 个错词 · 3 个待复习/);
-    assert.match(shelf,/data-id="today"><span>今天错词<\/span><span class="notebook-shelf-count">2<\/span>/);
-    assert.match(shelf,/data-id="week"><span>本周错词<\/span><span class="notebook-shelf-count">2<\/span>/);
+    const chapters=json('StudyCore.notebookChapters(state)');
+    assert.equal(chapters.find(ch=>ch.id==='all').count,4);
+    assert.equal(chapters.find(ch=>ch.id==='today').count,2);
+    assert.equal(chapters.find(ch=>ch.id==='week').count,2);
     clickAction('study-notebook-open',{id:'today'});
     assert.equal(lookup('#study-notebook-status').value,'all');
     assert.equal(lookup('#study-notebook-collection').value,'today');
@@ -805,8 +810,8 @@ test('deleting a task retains its wrong words and removes its notebook associati
     const units=json('state.notebookUnits'), unitId=Object.keys(units)[0];
     assert.equal(Object.keys(units).length,1);
     assert.equal(units[unitId].wordIds.length,3);
-    assert.match(lookup('#notebook-shelf').innerHTML,/错词单元 1/);
-    assert.match(lookup('#notebook-shelf').innerHTML,/3 \/ 30/);
+    const unit=json('StudyCore.notebookChapters(state)').find(ch=>ch.id===unitId);
+    assert.equal(unit.title,'错词单元 1');assert.equal(unit.count,3);
     assert.deepEqual(JSON.parse(stored.get('ordrum.rivstart.v1')).notebookUnits,units);
     const restored=browserReload();assert.deepEqual(restored.json('state.notebookUnits'),units);
     assert.equal(restored.run('Object.keys(state.notebook).length'),3);
@@ -845,7 +850,88 @@ test('deleting a task retains its wrong words and removes its notebook associati
     assert.match(lookup('#study-notebook-results').innerHTML,/已选 1/);
     assert.match(lookup('#study-notebook-results').innerHTML,/听读 \(ett\) kaffe/);
     assert.doesNotMatch(lookup('#study-notebook-results').innerHTML,/听读 here/);
-    assert.match(lookup('#notebook-shelf').innerHTML,/另一设备整理的单元/);
+    assert.ok(json('StudyCore.notebookChapters(state)').some(chapter=>chapter.title==='另一设备整理的单元'));
+  });
+  test('notebook book chapters drive the same study modes and preserve the original book selection',()=>{
+    resetStudyFixture();
+    run(`recordStudyResult('bomull','wrong','bom');recordStudyResult('here','wrong','har');StudyCore.organiseNotebook(state,'all');state.selectedBook='__notebook__';state.selectedNotebookChapters=['all'];changeChapters(['all']);state.mode='flashcard';renderMode();`);
+    assert.deepEqual(json('currentDeck'),['bomull','here']);
+    assert.deepEqual(json('state.selectedChapters'),[1,2]);
+    assert.match(lookup('#chapter-list').innerHTML,/今天错词|本周错词/);
+    assert.equal(lookup('#notebook-button').hidden,false);
+    clickAction('flip');assert.match(lookup('#mode-content').innerHTML,/id="word-extras"/);
+    const restored=browserReload();assert.equal(restored.run('state.selectedBook'),'__notebook__');
+    assert.deepEqual(restored.json('currentDeck'),['bomull','here']);
+  });
+  test('notebook tasks retain a frozen scope and resume after their source group is deleted',()=>{
+    resetStudyFixture();
+    run(`recordStudyResult('bomull','wrong','bom');recordStudyResult('here','wrong','har');StudyCore.organiseNotebook(state,'all');state.selectedBook='__notebook__';state.selectedNotebookChapters=[Object.keys(state.notebookUnits)[0]];const unit=state.selectedNotebookChapters[0];state.tasks.push(StudyCore.createTask({id:'__notebook__'},[unit],selectedWords(),'错词任务'));activateStudyTask(state.tasks[0].id);StudyCore.deleteNotebookUnit(state,unit);save();`);
+    assert.deepEqual(json('currentDeck'),['bomull','here']);
+    const restored=browserReload();assert.equal(restored.run('activeStudyTask().bookId'),'__notebook__');
+    assert.deepEqual(restored.json('currentDeck'),['bomull','here']);
+  });
+  test('review history records only the first dictation response across retries and reload',()=>{
+    resetStudyFixture();startDictation();typeAnswer('wrong');pressEnter();pressEnter();typeAnswer('bomull');pressEnter();
+    assert.equal(run('Object.values(state.reviewEvents).filter(e=>e.wordId==="bomull").length'),1);
+    assert.equal(run('Object.values(state.reviewEvents).find(e=>e.wordId==="bomull").outcome'),'wrong');
+    const sessionId=run('reviewSessionId');const restored=browserReload();
+    assert.equal(restored.run('reviewSessionId'),sessionId);
+    assert.equal(restored.run('window.OrdrumReview.schedules(state).bomull.objectiveCorrect'),0);
+  });
+  test('revealing a dictation answer cannot become an objective first success after retry',()=>{
+    resetStudyFixture();startDictation();clickAction('reveal-answer');pressEnter();typeAnswer('bomull');pressEnter();
+    const schedule=json('window.OrdrumReview.schedules(state).bomull');
+    assert.equal(schedule.revealed,1);assert.equal(schedule.objectiveAttempts,0);
+  });
+  test('flashcard self assessment is distinct from objective dictation accuracy',()=>{
+    resetStudyFixture();startFlash();clickAction('flash-known');
+    const schedule=json('window.OrdrumReview.schedules(state).bomull');
+    assert.equal(schedule.selfKnown,1);assert.equal(schedule.objectiveAttempts,0);
+    assert.equal(schedule.stage,1);
+  });
+  test('today plan and its original study checkpoint survive reload and return',()=>{
+    resetStudyFixture();run(`state.mode='flashcard';currentDeck=['yr','kaffe','bomull','skal'];flashIndex=2;flipped=true;save();startTodayPlan({mode:'flashcard',wordIds:['here','beer']});`);
+    assert.equal(run('planKind'),'today');assert.equal(run('state.mode'),'flashcard');
+    assert.equal(lookup('#today-plan').hidden,true);
+    const restored=browserReload();assert.equal(restored.run('planKind'),'today');
+    assert.deepEqual(restored.json('currentDeck'),['here','beer']);
+    restored.run('returnToStudy()');
+    assert.deepEqual(restored.json('[currentDeck,flashIndex,flipped,planKind]'),[['yr','kaffe','bomull','skal'],2,true,'']);
+  });
+  test('skip in today plan persists until tomorrow without creating a wrong-answer record',()=>{
+    resetStudyFixture();run(`startTodayPlan({mode:'flashcard',wordIds:['bomull','kaffe']});skipTodayWord();`);
+    assert.equal(run('currentWord(flashIndex).id'),'kaffe');
+    assert.equal(run('Object.keys(state.notebook).length'),0);
+    assert.equal(run('window.OrdrumReview.getPlan(state,data).wordIds.includes("bomull")'),false);
+    assert.equal(run('Object.values(state.reviewEvents)[0].outcome'),'skip');
+  });
+  test('import presents changes without applying them, then saves a scoped recovery point before commit',()=>{
+    resetStudyFixture();run(`recordStudyResult('kaffe','wrong','ka');captureStudySession();`);
+    const old=json('state');
+    run(`previewRestore({app:'ordrum',version:1,book:data.book.id,state:{marks:{bomull:{status:'known'}}}})`);
+    assert.deepEqual(json('state'),old);assert.equal(lookup('#app-dialog').open,true);
+    assert.match(lookup('#dialog-content').innerHTML,/变化|备份当前记录并恢复/);
+    run('commitRestore()');
+    assert.equal(run('state.marks.bomull.status'),'known');
+    assert.equal(run('window.OrdrumSyncHealth.getRecovery(recoveryScope()).backup.state.notebook.kaffe.count'),1);
+    assert.equal(run('window.OrdrumSyncHealth.getRecovery(recoveryScope()).backup.state.marks.bomull'),undefined);
+  });
+  test('recovery quota failure leaves current state and persisted learning data intact',()=>{
+    resetStudyFixture();run(`save();previewRestore({app:'ordrum',version:1,state:{marks:{bomull:{status:'known'}}}})`);
+    const old=json('state'),saved=stored.get('ordrum.rivstart.v1'), setter=sandbox.localStorage.setItem;
+    sandbox.localStorage.setItem=(key,value)=>{if(key==='ordrum.rivstart.v1')throw new Error('quota');setter(key,value);};
+    try{run('commitRestore()');}finally{sandbox.localStorage.setItem=setter;}
+    assert.deepEqual(json('state'),old);assert.equal(stored.get('ordrum.rivstart.v1'),saved);
+    assert.match(lookup('#toast').textContent,/尚未更改当前进度/);
+  });
+  test('recovery rechecks a changed preview and prevents cross-account confirmation',()=>{
+    resetStudyFixture();run(`previewRestore({app:'ordrum',version:1,state:{marks:{bomull:{status:'known'}}}});state.marks.kaffe={status:'review'};commitRestore();`);
+    assert.equal(run('state.marks.bomull'),undefined);
+    assert.match(lookup('#toast').textContent,/已更新恢复预览/);
+    const getHealth=sandbox.window.OrdrumCloud.getHealth;
+    sandbox.window.OrdrumCloud.getHealth=()=>({accountId:'a'.repeat(64)});
+    try{run('commitRestore()');}finally{sandbox.window.OrdrumCloud.getHealth=getHealth;}
+    assert.equal(run('state.marks.bomull'),undefined);assert.equal(run('pendingRestore'),null);
   });
   console.log(`\n${passed} focused checks passed.`);
 })().catch(error => {console.error(error);process.exitCode=1;});

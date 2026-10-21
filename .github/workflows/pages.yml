@@ -11,6 +11,9 @@ on:
       - 'tests/cloud.test.cjs'
       - 'tests/study.test.cjs'
       - 'tests/settings.test.cjs'
+      - 'tests/review.test.cjs'
+      - 'tests/sync-health.test.cjs'
+      - 'tests/word-extras.test.cjs'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -40,7 +43,7 @@ jobs:
       - name: Read Pages configuration
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Verify private progress sync
-        run: node tests/study.test.cjs && node tests/settings.test.cjs && node tests/cloud.test.cjs && node tests/github-sync.test.cjs
+        run: node tests/study.test.cjs && node tests/settings.test.cjs && node tests/cloud.test.cjs && node tests/github-sync.test.cjs && node tests/review.test.cjs && node tests/sync-health.test.cjs && node tests/word-extras.test.cjs && node tests/frontend.test.cjs
       - name: Verify project-site paths and export
         run: node tests/pages.test.cjs
       - name: Export static learning app

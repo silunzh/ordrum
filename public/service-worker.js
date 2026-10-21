@@ -1,14 +1,14 @@
 'use strict';
 
 // scripts/version-pwa.cjs stamps this from the complete static shell before build.
-const BUILD_ID = 'b2d4be63c8e5a0fd';
+const BUILD_ID = '4ffe2dee969fc3cb';
 const BASE_URL = new URL('./',self.location.href);
 const CACHE_SCOPE = BASE_URL.pathname === '/' ? '' : `${encodeURIComponent(BASE_URL.pathname)}-`;
 const SHELL_PREFIX = `ordrum-shell-${CACHE_SCOPE}`;
 const SHELL_CACHE = `${SHELL_PREFIX}${BUILD_ID}`;
 const AUDIO_CACHE = `ordrum-audio-${CACHE_SCOPE}v1`;
 const CORE_FILES = [
-  'index.html','style.css','study.css','workspace.css','settings.css','settings.js','study.js','session.js','app.js','cloud.js',
+  'index.html','style.css','study.css','workspace.css','settings.css','settings.js','review.css','review.js','sync-health.css','sync-health.js','word-extras.css','word-extras.js','study.js','session.js','app.js','cloud.js',
   'pwa.js','github-sync.js','vocab.json','audio-map.json','manifest.webmanifest',
   'icons/icon.svg','icons/icon-192.png','icons/icon-512.png',
   'icons/icon-maskable-512.png','icons/apple-touch-icon.png',

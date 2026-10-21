@@ -17,11 +17,17 @@
   <link rel="stylesheet" href="study.css">
   <link rel="stylesheet" href="workspace.css">
   <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="review.css">
+  <link rel="stylesheet" href="sync-health.css">
+  <link rel="stylesheet" href="word-extras.css">
   <script src="study.js" defer></script>
+  <script src="review.js" defer></script>
   <script src="session.js" defer></script>
   <script src="settings.js" defer></script>
   <script src="github-sync.js" defer></script>
   <script src="cloud.js" defer></script>
+  <script src="sync-health.js" defer></script>
+  <script src="word-extras.js" defer></script>
   <script src="app.js" defer></script>
   <script src="pwa.js" defer></script>
 </head>
@@ -48,13 +54,11 @@
           <div id="chapter-list" class="chapter-list"><div class="loading-small">正在整理书架…</div></div>
           </details>
           <button class="secondary-button study-create-sidebar" id="create-task-button">＋ 创建学习任务</button>
-          <section class="notebook-library" aria-label="错题本">
-            <div class="notebook-library-heading"><h2>错题本</h2><button class="text-button" id="notebook-button">管理</button></div>
-            <div id="notebook-shelf"></div>
-          </section>
+          <button class="secondary-button notebook-manage-book" id="notebook-button" hidden>管理错题本</button>
         </aside>
 
         <section class="learning-panel" aria-label="学习区">
+          <div id="today-plan"></div>
           <div id="task-context"></div>
           <div class="learning-heading"><div><h1 id="selection-title">正在加载单词…</h1><p id="selection-description"></p></div><div class="learned-summary"><span class="learned-icon" data-icon="check"></span><div><strong id="known-count">0</strong><span>已掌握</span></div></div></div>
           <div class="mode-toolbar"><div class="mode-tabs" role="tablist" aria-label="学习模式"><button id="tab-preview" class="mode-tab active" role="tab" aria-selected="true" aria-controls="mode-content" data-mode="preview"><span data-icon="grid"></span>预览</button><button id="tab-flashcard" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="flashcard"><span data-icon="cards"></span>翻卡片</button><button id="tab-dictation" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="dictation"><span data-icon="headphones"></span>听写</button></div></div>

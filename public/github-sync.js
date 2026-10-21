@@ -4,10 +4,10 @@
   const MIGRATION_KEY = 'ordrum.github.migration.v1';
   const API = 'https://api.github.com';
   const API_VERSION = '2026-03-10';
-  // Version 2 protects notebook units from older clients whose restore logic
+  // Version 3 protects review events, notebook-book selections and notebook units from older clients whose restore logic
   // drops unknown fields. Those clients reject this envelope before writing.
-  // Existing version 1 records remain readable and upgrade on the next write.
-  const RECORD_VERSION = 2;
+  // Existing version 1/2 records remain readable and upgrade on the next write.
+  const RECORD_VERSION = 3;
   const MAX_BYTES = 3 * 1024 * 1024;
   const MAX_WIRE_BYTES = Math.ceil(MAX_BYTES * 1.5) + 65536;
   const HEX = /^[a-f0-9]{64}$/;
@@ -168,7 +168,7 @@
     const text = decode(encoded);
     if (new TextEncoder().encode(text).byteLength !== file.size) throw error('GITHUB_INVALID_FILE','同步文件不完整；原有记录已保留。');
     let record; try { record = JSON.parse(text); } catch (_) { throw error('GITHUB_INVALID_FILE','同步文件格式无效；原有记录已保留。'); }
-    if (!object(record) || ![1,RECORD_VERSION].includes(record.version) || record.accountId !== account.accountId || !Number.isSafeInteger(record.revision) || record.revision < 1
+    if (!object(record) || ![1,2,RECORD_VERSION].includes(record.version) || record.accountId !== account.accountId || !Number.isSafeInteger(record.revision) || record.revision < 1
       || !validState(record.state)) throw error('GITHUB_INVALID_FILE','同步文件版本、账号或记录无效；原有记录已保留。');
     return {state:record.state,revision:record.revision,accountId:account.accountId,lastUpdated:typeof record.updatedAt === 'string' ? record.updatedAt : null,sha:file.sha};
   }

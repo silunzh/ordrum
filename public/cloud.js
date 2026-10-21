@@ -5,6 +5,9 @@
   const STATE_KEY = 'ordrum.rivstart.v1';
   const COMMIT_MARKER = '__cloudCommitId';
   const ACCOUNT_PREFIX = 'ordrum.account.';
+  const HEALTH_KEY = 'ordrum.cloud.health.v1';
+  const healthListeners = new Set();
+  let successTimes = {};
   const copy = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
   const own = (value,key) => object(value) && Object.prototype.hasOwnProperty.call(value,key);
@@ -15,6 +18,34 @@
     if (!object(a) || !object(b)) return false;
     const keys = Object.keys(a);
     return keys.length === Object.keys(b).length && keys.every(key => own(b,key) && equal(a[key],b[key]));
+  }
+  function cleanReviewPreferences(value) {
+    if (typeof global.OrdrumReview?.cleanPreferences === 'function') return global.OrdrumReview.cleanPreferences(value);
+    const prefs = object(value) ? value : {}, proposed = prefs.intervals;
+    const clamp = (value,fallback,max) => Number.isFinite(Number(value)) ? Math.min(max,Math.max(0,Math.floor(Number(value)))) : fallback;
+    const intervals = Array.isArray(proposed) && proposed.length === 5 && proposed.every((day,index) => Number.isInteger(day) && day >= 1 && day <= 365 && (!index || day > proposed[index-1])) ? proposed.slice() : [1,3,7,14,30];
+    const stamp = prefs.updatedAt !== null && prefs.updatedAt !== undefined && prefs.updatedAt !== '' && typeof prefs.updatedAt !== 'boolean' ? new Date(prefs.updatedAt) : null;
+    return {reviewLimit:clamp(prefs.reviewLimit,20,100),newLimit:clamp(prefs.newLimit,5,30),intervals,paused:prefs.paused === true,updatedAt:stamp && Number.isFinite(stamp.getTime()) ? stamp.toISOString() : '1970-01-01T00:00:00.000Z'};
+  }
+  function mergeReviewEvents(local,remote) {
+    if (typeof global.OrdrumReview?.mergeEvents === 'function') return global.OrdrumReview.mergeEvents(local,remote);
+    // Standalone cloud clients use the same canonical field order as review.js.
+    // The ordinary object merger must never assemble two immutable events.
+    const result = {}, safeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value) && !['__proto__','constructor','prototype'].includes(value);
+    const modes = {dictation:['correct','wrong','revealed','skip'],flashcard:['known','again','skip']};
+    const dayNumber = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value+'T00:00:00.000Z')) && new Date(value+'T00:00:00.000Z').toISOString().slice(0,10) === value ? Date.parse(value+'T00:00:00.000Z')/86400000 : null;
+    for (const input of [local,remote]) if (object(input)) Object.keys(input).sort().forEach(id => {
+      const event = input[id];
+      if (!safeId(id) || !object(event) || event.id !== id || !safeId(event.wordId) || !safeId(event.sessionId) || !own(modes,event.mode) || !modes[event.mode].includes(event.outcome)) return;
+      if (event.at === null || event.at === undefined || event.at === '' || typeof event.at === 'boolean') return;
+      const stamp = new Date(event.at);
+      if (!Number.isFinite(stamp.getTime())) return;
+      const at = stamp.toISOString(),day = event.day;
+      if (dayNumber(day) === null || Math.abs(dayNumber(day)-dayNumber(at.slice(0,10))) > 1) return;
+      const row = {id,wordId:event.wordId,sessionId:event.sessionId,mode:event.mode,outcome:event.outcome,at,day};
+      if (!own(result,id) || JSON.stringify(row) < JSON.stringify(result[id])) result[id] = row;
+    });
+    return result;
   }
   function mergeThreeWay(base,local,remote) {
     function merge(b,l,r,path) {
@@ -61,10 +92,22 @@
       if (/\.(?:updatedAt|updated)$/.test(path)) return Date.parse(r) > Date.parse(l) ? r : l;
       return copy(l);
     }
-    return merge(base,local,remote,'');
+    const result = merge(base,local,remote,'');
+    if (object(result)) {
+      // Apply these top-level policies even when an ancestor equality shortcut
+      // would otherwise erase records omitted by an older device snapshot.
+      if ([base,local,remote].some(value => own(value,'reviewEvents'))) result.reviewEvents = mergeReviewEvents(local?.reviewEvents,remote?.reviewEvents);
+      if ([local,remote].some(value => own(value,'reviewPreferences'))) {
+        const l = own(local,'reviewPreferences') ? cleanReviewPreferences(local.reviewPreferences) : null;
+        const r = own(remote,'reviewPreferences') ? cleanReviewPreferences(remote.reviewPreferences) : null;
+        result.reviewPreferences = copy(!l ? r : !r ? l : time(r) > time(l) ? r : time(l) > time(r) ? l : JSON.stringify(r) < JSON.stringify(l) ? r : l);
+      }
+    }
+    return result;
   }
   function hasLocalProgress(value) {
-    if ((value.tasks || []).length || ['marks','overrides','notebook'].some(key => Object.keys(value[key] || {}).length)) return true;
+    if ((value.tasks || []).length || ['marks','overrides','notebook','notebookUnits','reviewEvents'].some(key => Object.keys(value[key] || {}).length)) return true;
+    if (!equal(cleanReviewPreferences(value.reviewPreferences),cleanReviewPreferences(undefined))) return true;
     const sessions = [value.studySession,value.reviewSession?.session];
     return sessions.some(s => s && (s.mode !== 'preview' || s.flashIndex || s.dictationIndex || s.flipped || s.draft || s.dictationResult || Object.keys(s.dictationAnswers || {}).length));
   }
@@ -75,12 +118,61 @@
   function remove(key) { try { localStorage.removeItem(key); return true; } catch (_) { return write(key,null); } }
   function connected() { return typeof config?.isConnected !== 'function' || config.isConnected() !== false; }
   function localState() { const value = copy(config.getState()); if (object(value)) delete value[COMMIT_MARKER]; return value; }
+  function changeSummary(base,current) {
+    const groups = {};
+    const maps = ['marks','overrides','notebook','notebookUnits','reviewEvents'];
+    for (const key of maps) {
+      const before = object(base?.[key]) ? base[key] : {}, after = object(current?.[key]) ? current[key] : {};
+      const changed = [...new Set([...Object.keys(before),...Object.keys(after)])].filter(id => !equal(before[id],after[id])).length;
+      if (changed) groups[key] = changed;
+    }
+    const tasks = rows => Object.fromEntries((Array.isArray(rows) ? rows : []).filter(row => object(row) && typeof row.id === 'string' && !['__proto__','constructor','prototype'].includes(row.id)).map(row => [row.id,row]));
+    const beforeTasks = tasks(base?.tasks), afterTasks = tasks(current?.tasks);
+    const changedTasks = [...new Set([...Object.keys(beforeTasks),...Object.keys(afterTasks)])].filter(id => !equal(beforeTasks[id],afterTasks[id])).length;
+    if (changedTasks) groups.tasks = changedTasks;
+    const preferences = ['selectedChapters','selectedBook','selectedNotebookChapters','mode','layout','rate','autoPlay','voiceURI','activeTaskId','reviewPreferences'];
+    const positions = ['studySession','reviewSession'];
+    if (preferences.some(key => !equal(base?.[key],current?.[key]))) groups.preferences = 1;
+    if (positions.some(key => !equal(base?.[key],current?.[key]))) groups.positions = 1;
+    return {knownBaseline:base !== undefined && base !== null,count:Object.values(groups).reduce((sum,n) => sum+n,0),groups};
+  }
+  function getHealth() {
+    let pending;
+    try { pending = changeSummary(metadata?.base,config ? localState() : {}); }
+    catch (_) { pending = {knownBaseline:false,count:0,groups:{},unavailable:true}; }
+    const accountId = metadata?.accountId || null;
+    const code = currentStatus === 'synced' && pending.count ? 'pending' : currentStatus;
+    const action = code === 'signin' || code === 'local' ? 'reconnect' : ['error','limit','offline','pending'].includes(code) ? 'retry' : null;
+    return {status:code,connected:config ? connected() : false,online:global.navigator?.onLine !== false,accountId,lastSuccessAt:accountId ? successTimes[accountId] || null : null,pending,action,recoveryPending:!!read(JOURNAL_KEY)};
+  }
+  function emitHealth() {
+    const health = getHealth();
+    // Diagnostic subscribers get counts and opaque scope only, never state or credentials.
+    if (typeof config?.onHealth === 'function') { try { config.onHealth(copy(health)); } catch (_) {} }
+    healthListeners.forEach(listener => { try { listener(copy(health)); } catch (_) {} });
+  }
+  function onHealth(listener) {
+    if (typeof listener !== 'function') return () => {};
+    healthListeners.add(listener);
+    try { listener(getHealth()); } catch (_) {}
+    return () => healthListeners.delete(listener);
+  }
+  function successfulSync(accountId) {
+    const supplied = typeof config.now === 'function' ? config.now() : Date.now();
+    const parsed = new Date(supplied);
+    const now = Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
+    successTimes[accountId] = now;
+    const entries = Object.entries(successTimes).sort((a,b) => Date.parse(b[1])-Date.parse(a[1])).slice(0,12);
+    successTimes = Object.fromEntries(entries);
+    write(HEALTH_KEY,{version:1,accounts:successTimes});
+  }
   function status(code,detail) {
     currentStatus = code;
     if (config?.onStatus) config.onStatus(code,detail);
+    emitHealth();
     const element = document.querySelector('#cloud-status');
     if (!element) return;
-    const labels = {connecting:'正在连接云端',syncing:'正在同步学习进度',synced:'学习进度已同步',offline:'离线学习 · 联网后同步',signin:'登录以同步学习进度',local:'进度已保存本机 · 连接账号后同步',error:'已保存在此设备 · 等待重试',limit:'进度已保存本机 · 云端记录过大'};
+    const labels = {connecting:'正在连接云端',syncing:'正在同步学习进度',synced:'学习进度已同步',pending:'进度已保存本机 · 等待同步',offline:'离线学习 · 联网后同步',signin:'登录以同步学习进度',local:'进度已保存本机 · 连接账号后同步',error:'已保存在此设备 · 等待重试',limit:'进度已保存本机 · 云端记录过大'};
     const customLabel = code === 'local' ? config?.localLabel : code === 'signin' ? config?.signInLabel : null;
     element.textContent = customLabel || labels[code] || labels.error;
     element.dataset.status = code;
@@ -216,7 +308,7 @@
         // interrupted request must not turn previously downloaded words into new local edits.
         commitMerge(local,merged,{accountId:remote.accountId,revision:remote.revision,base:copy(remote.state)});
         if (equal(merged,remote.state)) {
-          archiveCurrent(); status('synced'); return;
+          archiveCurrent(); successfulSync(remote.accountId); status('synced'); return;
         }
         const sent = copy(merged);
         const result = await request('PUT',{state:sent,baseRevision:remote.revision,expectedAccountId:remote.accountId});
@@ -230,7 +322,8 @@
         archiveCurrent();
         // Input may have changed while the request was in flight. Keep it locally and upload next.
         if (!equal(localState(),sent)) rerun = true;
-        status('synced'); return;
+        successfulSync(result.accountId);
+        status(equal(localState(),result.state) ? 'synced' : 'pending'); return;
       }
       status('error','另一台设备也在更新进度，稍后自动重试。');
     } catch (_) {
@@ -247,10 +340,17 @@
     if (!connected()) { status('local'); return; }
     const delay = Number.isFinite(config.debounceMs) && config.debounceMs >= 0 ? config.debounceMs : 1000;
     timer = setTimeout(sync,delay);
+    if (!running && getHealth().pending.count && !['error','signin','limit'].includes(currentStatus)) status('pending');
+    else emitHealth();
   }
   function start(options) {
     config = options;
     metadata = read(META_KEY);
+    const savedHealth = read(HEALTH_KEY);
+    successTimes = {};
+    if (savedHealth?.version === 1 && object(savedHealth.accounts)) {
+      Object.entries(savedHealth.accounts).filter(([id,stamp]) => /^[a-f0-9]{64}$/.test(id) && typeof stamp === 'string' && Number.isFinite(Date.parse(stamp))).slice(0,12).forEach(([id,stamp]) => { successTimes[id] = stamp; });
+    }
     if (metadata && !validMetadata(metadata)) metadata = null;
     started = true;
     if (!poll) {
@@ -279,5 +379,5 @@
     status('connecting'); return sync();
   }
   function updateConnectionStatus() { return sync(); }
-  global.OrdrumCloud = {mergeThreeWay,equal,start,schedule,sync,updateConnectionStatus};
+  global.OrdrumCloud = {mergeThreeWay,equal,changeSummary,start,schedule,sync,updateConnectionStatus,getHealth,onHealth};
 })(window);

@@ -1,0 +1,22 @@
+.review-plan{border:1px solid var(--line);border-radius:10px;background:var(--paper);padding:17px 19px;margin:0 0 20px;color:var(--ink)}
+.review-plan-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.review-plan-heading h2{font-size:16px;margin:0 0 4px;font-weight:650}
+.review-plan-heading p,.review-plan-note{font-size:12px;line-height:1.65;color:var(--muted);margin:0}
+.review-plan-options{appearance:none;background:transparent;border:1px solid transparent;border-radius:6px;min-height:36px;font:inherit;font-size:12px;padding:6px 9px;color:var(--green);cursor:pointer}
+.review-plan-options:hover{background:var(--sage);border-color:var(--line)}
+.review-plan-counts{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 24px;font-size:12px;margin:15px 0;color:var(--muted)}
+.review-plan-counts strong{font-size:23px;font-weight:650;color:var(--ink);margin-right:3px;font-variant-numeric:tabular-nums}
+.review-plan-done{margin-left:auto}
+.review-plan-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin-top:12px}
+.review-plan-actions .primary-button,.review-plan-actions .secondary-button{min-height:40px;padding:9px 16px;font-size:12px}
+.review-plan button:disabled{cursor:default;opacity:.5}
+.review-plan button:focus-visible,.review-plan input:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.review-plan-settings{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.review-plan-settings[hidden]{display:none}
+.review-plan-settings label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink)}
+.review-plan-settings input{width:100%;min-height:39px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;padding:8px 10px;box-sizing:border-box}
+.review-plan-settings small{font-size:11px;color:var(--muted);line-height:1.65}
+.review-intervals{grid-column:1/-1}
+.review-plan-warning,.review-plan-feedback{font-size:12px;line-height:1.65;margin:10px 0 0;color:var(--orange)}
+.review-plan-feedback:empty{display:none}
+@media(max-width:760px){.review-plan{padding:14px;margin-bottom:16px}.review-plan-counts{gap:6px 18px;margin:12px 0}.review-plan-done{margin-left:0;font-size:11px}.review-plan-heading h2{font-size:15px}.review-plan-heading p{font-size:11px}.review-plan-actions{gap:7px}.review-plan-actions .primary-button,.review-plan-actions .secondary-button{padding:8px 12px}.review-plan-settings{gap:10px}.review-plan-settings input{font-size:16px}}

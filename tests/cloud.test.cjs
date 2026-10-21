@@ -317,13 +317,13 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
     const remote={...empty(),notebook:{word:{count:2,status:'pending'}}};let blockMetadata=true;
     const storage=new Map();
     const first=harness({storage,denyStorage:key=>blockMetadata&&key===META,network:async()=>reply(remote,5)});await first.start();
-    assert.equal(first.statuses.at(-1),'error');assert.ok(first.state.notebook.word);
+    assert.equal(first.statuses.at(-1),'error');assert.ok(first.state.notebook.word);assert.equal(first.api.getHealth().recoveryPending,true);
     const journal=JSON.parse(storage.get(JOURNAL));assert.equal(JSON.parse(storage.get(MAIN))[MARKER],journal.id);
     first.local({...first.state,notebook:{}});blockMetadata=false;
     const state=JSON.parse(storage.get(MAIN));delete state[MARKER];
     const second=harness({state,storage,network:async entry=>entry.method==='GET'?reply(remote,5):reply(entry.payload.state,6)});await second.start();
     assert.equal(second.state.notebook.word,undefined);assert.equal(second.requests[1].payload.state.notebook.word,undefined);
-    assert.equal(storage.has(JOURNAL),false);assert.equal(JSON.parse(storage.get(META)).revision,6);
+    assert.equal(storage.has(JOURNAL),false);assert.equal(JSON.parse(storage.get(META)).revision,6);assert.equal(second.api.getHealth().recoveryPending,false);
     assert.equal(second.requests[1].payload.state[MARKER],undefined,'the atomic local commit marker must never leave this device');
   });
   await test('journal recovery finishes an interrupted account switch before requesting or uploading data',async()=>{
@@ -385,6 +385,91 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
     const state=JSON.parse(storage.get(MAIN));delete state[MARKER];
     const second=harness({state,storage,options,network:async entry=>entry.method==='GET'?reply(null,0,B):reply(entry.payload.state,1,B)});await second.start();
     assert.deepEqual(Object.keys(second.state.marks),['lateB']);assert.equal(completed,1);assert.equal(storage.has(JOURNAL),false);assert.equal(second.statuses.at(-1),'synced');
+  });
+  await test('health distinguishes local records from uploaded records while offline and signed out',async()=>{
+    const baseline=empty(),local={...empty(),marks:{word:known('2026-10-21T10:00:00Z')}};
+    const storage=new Map([[META,JSON.stringify({accountId:A,revision:4,base:baseline})]]);
+    let connected=true;const app=harness({state:local,storage,online:false,options:{isConnected:()=>connected}});
+    await app.start();let health=app.api.getHealth();
+    assert.equal(health.status,'offline');assert.equal(health.pending.knownBaseline,true);assert.equal(health.pending.count,1);assert.equal(health.pending.groups.marks,1);assert.equal(health.lastSuccessAt,null);
+    app.window.navigator.onLine=true;connected=false;await app.api.sync();health=app.api.getHealth();
+    assert.equal(health.status,'local');assert.equal(health.pending.count,1);assert.equal(health.accountId,A);assert.equal(health.action,'reconnect');assert.equal(app.requests.length,0);
+  });
+  await test('an equal remote confirmation persists an account scoped success time without a PUT',async()=>{
+    const stamp='2026-10-21T11:00:00.000Z';const storage=new Map();
+    const app=harness({storage,options:{now:()=>stamp},network:async()=>reply(empty(),7)});await app.start();
+    assert.equal(app.requests.length,1);assert.equal(app.api.getHealth().lastSuccessAt,stamp);assert.equal(app.api.getHealth().pending.count,0);
+    const reloaded=harness({state:app.state,storage,online:false});await reloaded.start();assert.equal(reloaded.api.getHealth().lastSuccessAt,stamp);
+    const otherStamp='2026-10-21T12:00:00.000Z';
+    const other=harness({state:app.state,storage,options:{now:()=>otherStamp},network:async()=>reply(empty(),3,B)});await other.start();
+    assert.equal(other.api.getHealth().accountId,B);assert.equal(other.api.getHealth().lastSuccessAt,otherStamp);
+    const back=harness({state:other.state,storage,network:async()=>Response.json({error:'revoked'},{status:403})});await back.start();
+    assert.equal(back.api.getHealth().accountId,B);assert.equal(back.api.getHealth().lastSuccessAt,otherStamp);assert.equal(back.api.getHealth().status,'signin');
+    const times=JSON.parse(storage.get('ordrum.cloud.health.v1')).accounts;assert.equal(times[A],stamp);assert.equal(times[B],otherStamp);
+  });
+  await test('failed CAS retries never clear pending changes or claim a successful upload',async()=>{
+    const baseline=empty(),local={...empty(),notebook:{word:{count:1,status:'pending'}}};
+    const storage=new Map([[META,JSON.stringify({accountId:A,revision:1,base:baseline})]]);
+    const app=harness({state:local,storage,network:async entry=>entry.method==='GET'?reply(baseline,1):reply(baseline,2,A,409)});await app.start();
+    assert.equal(app.api.getHealth().status,'error');assert.equal(app.api.getHealth().pending.groups.notebook,1);assert.equal(app.api.getHealth().lastSuccessAt,null);
+  });
+  await test('health keeps queued edits visible after an earlier snapshot succeeds in flight',async()=>{
+    let finish,remote=null;const stamp='2026-10-21T13:00:00.000Z';
+    const app=harness({state:{...empty(),marks:{one:known(stamp)}},options:{now:()=>stamp},network:async entry=>{
+      if(entry.method==='GET')return reply(remote,0);
+      return new Promise(resolve=>{finish=()=>{remote=clone(entry.payload.state);resolve(reply(remote,1));};});
+    }});
+    const starting=app.start();await new Promise(resolve=>setImmediate(resolve));
+    app.local({...app.state,marks:{...app.state.marks,two:known(stamp)}});finish();await starting;
+    const health=app.api.getHealth();assert.equal(health.status,'pending');assert.equal(health.pending.groups.marks,1);assert.equal(health.lastSuccessAt,stamp);assert.ok(app.state.marks.two);assert.equal(remote.marks.two,undefined);
+  });
+  await test('health subscriptions report only diagnostics and can unsubscribe safely',async()=>{
+    const records=[],app=harness({options:{onHealth:health=>records.push(health)},network:async()=>reply(empty(),2)});
+    let count=0;const stop=app.api.onHealth(()=>count++);await app.start();const before=count;stop();app.api.schedule();
+    assert.equal(count,before);assert.ok(records.length>1);assert.equal(records.at(-1).status,'synced');
+    assert.deepEqual(Object.keys(records.at(-1)).sort(),['accountId','action','connected','lastSuccessAt','online','pending','recoveryPending','status']);
+    assert.equal(JSON.stringify(records).includes('token'),false);assert.equal(records.at(-1).state,undefined);
+  });
+  await test('immutable review event union survives ancestor shortcuts and old clients omitting history',()=>{
+    const event={id:'review-one',wordId:'word',sessionId:'round-one',mode:'dictation',outcome:'wrong',at:'2026-10-21T09:00:00.000Z',day:'2026-10-21'};
+    const base={reviewEvents:{'review-one':event}},missing={reviewEvents:{}};
+    assert.deepEqual(clone(pure.mergeThreeWay(base,clone(base),missing).reviewEvents),base.reviewEvents);
+    assert.deepEqual(clone(pure.mergeThreeWay(base,missing,clone(base)).reviewEvents),base.reviewEvents);
+    assert.deepEqual(clone(pure.mergeThreeWay(base,missing,missing).reviewEvents),{});
+  });
+  await test('review event collisions select one canonical whole event and match the review engine',()=>{
+    const a={id:'review-same',wordId:'word-a',sessionId:'round-a',mode:'dictation',outcome:'wrong',at:'2026-10-21T09:00:00Z',day:'2026-10-21',untrusted:'discard'};
+    const b={day:'2026-10-21',at:'2026-10-21T10:00:00.000Z',outcome:'correct',mode:'dictation',sessionId:'round-b',wordId:'word-b',id:'review-same'};
+    const left={reviewEvents:{'review-same':a}},right={reviewEvents:{'review-same':b}};
+    const reviewWindow={};vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../public/review.js'),'utf8'),{window:reviewWindow,console,Date});
+    const expected=clone(reviewWindow.OrdrumReview.mergeEvents(left.reviewEvents,right.reviewEvents));
+    const result=clone(pure.mergeThreeWay(undefined,left,right));assert.deepEqual(result.reviewEvents,expected);assert.deepEqual(clone(pure.mergeThreeWay(undefined,right,left)),result);
+    assert.equal(result.reviewEvents['review-same'].untrusted,undefined);assert.equal(result.reviewEvents['review-same'].wordId,'word-a');assert.equal(result.reviewEvents['review-same'].outcome,'wrong');
+  });
+  await test('review preferences choose the latest whole update with deterministic normalized timestamp ties',()=>{
+    const base={reviewPreferences:{reviewLimit:20,newLimit:5,intervals:[1,3,7,14,30],paused:false,updatedAt:'2026-10-20T09:00:00Z'}};
+    const local={reviewPreferences:{...base.reviewPreferences,reviewLimit:8,updatedAt:'2026-10-21T09:00:00Z'}};
+    const remote={reviewPreferences:{...base.reviewPreferences,newLimit:2,paused:true,updatedAt:'2026-10-21T10:00:00Z'}};
+    const result=clone(pure.mergeThreeWay(base,local,remote).reviewPreferences);assert.equal(result.reviewLimit,20);assert.equal(result.newLimit,2);assert.equal(result.paused,true);assert.equal(result.updatedAt,'2026-10-21T10:00:00.000Z');
+    const tied={reviewPreferences:{...remote.reviewPreferences,updatedAt:local.reviewPreferences.updatedAt}};
+    assert.deepEqual(clone(pure.mergeThreeWay(base,local,tied)),clone(pure.mergeThreeWay(base,tied,local)));
+    const omitted=pure.mergeThreeWay(base,local,{marks:{}});assert.equal(omitted.reviewPreferences.reviewLimit,8);
+  });
+  await test('first sync preserves local review history preferences and notebook units even without old progress fields',async()=>{
+    const event={id:'review-first',wordId:'word',sessionId:'round-first',mode:'flashcard',outcome:'known',at:'2026-10-21T09:00:00Z',day:'2026-10-21'};
+    const remote={...empty(),mode:'dictation',marks:{remote:known('2026-10-20T09:00:00Z')}};
+    for(const extra of [{reviewEvents:{'review-first':event}},{reviewPreferences:{reviewLimit:9,updatedAt:'2026-10-21T09:00:00Z'}},{notebookUnits:{'unit-one':{wordIds:['word']}}}]){
+      const app=harness({state:{...empty(),...extra},network:async entry=>entry.method==='GET'?reply(remote,4):reply(entry.payload.state,5)});await app.start();
+      assert.equal(app.requests.length,2);assert.ok(app.state.marks.remote);
+      if(extra.reviewEvents)assert.ok(app.requests[1].payload.state.reviewEvents['review-first']);
+      if(extra.reviewPreferences)assert.equal(app.requests[1].payload.state.reviewPreferences.reviewLimit,9);
+      if(extra.notebookUnits)assert.deepEqual(app.requests[1].payload.state.notebookUnits,extra.notebookUnits);
+    }
+  });
+  await test('default normalized review preferences still allow a fresh phone to adopt the complete remote snapshot',async()=>{
+    const defaults={reviewLimit:20,newLimit:5,intervals:[1,3,7,14,30],paused:false,updatedAt:'1970-01-01T00:00:00.000Z'};
+    const remote={...empty(),mode:'dictation',reviewPreferences:{...defaults,reviewLimit:7,updatedAt:'2026-10-21T09:00:00.000Z'}};
+    const app=harness({state:{...empty(),reviewPreferences:defaults,reviewEvents:{},notebookUnits:{}},network:async()=>reply(remote,5)});await app.start();assert.equal(app.requests.length,1);assert.equal(app.state.mode,'dictation');assert.deepEqual(app.state.reviewPreferences,remote.reviewPreferences);
   });
   console.log(`\n${passed} cloud checks passed.`);
 })().catch(error=>{console.error(error);process.exitCode=1;});
