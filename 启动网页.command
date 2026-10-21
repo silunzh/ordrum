@@ -50,6 +50,6 @@ open_url="$url/"
 if [ -n "$launch_token" ]; then
   open_url="$url/?launch=$launch_token"
 fi
-printf '\n网页已打开：%s\n网页内点击“连接线上账号”，登录同一账号并确认，即可同步本地与线上进度。\n保留此窗口即可继续使用；按 Control+C 停止。\n\n' "$open_url"
+printf '\n网页已打开：%s\n网页内点击“同步设置”，连接同一个 GitHub 私有进度仓库，即可自动同步。\n保留此窗口即可继续使用；按 Control+C 停止。\n\n' "$open_url"
 /usr/bin/open "$open_url"
 wait "$server_pid"

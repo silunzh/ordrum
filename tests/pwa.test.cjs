@@ -141,7 +141,7 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
     const sw=worker();await sw.event('install');const count=sw.fetches.length;
     const storesBefore=[...sw.stores.keys()];
     assert.equal(await sw.fetchEvent('/?launch=20261021-123-456',{mode:'navigate'}),undefined);
-    for(const file of ['app.js','local-sync.js','cloud.js','study.js','session.js','pwa.js','style.css','study.css']) {
+    for(const file of ['app.js','github-sync.js','cloud.js','study.js','session.js','pwa.js','style.css','study.css']) {
       assert.equal(await sw.fetchEvent(`/${file}?launch=20261021-123-456`),undefined,file);
     }
     assert.equal(sw.fetches.length,count);assert.deepEqual([...sw.stores.keys()],storesBefore);

@@ -64,7 +64,7 @@ async function unusedPort() {
     launchHtml = await response.text();
     assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('clear-site-data'), null); assert.equal(response.headers.get('set-cookie'), null);
-    for (const file of ['app.js', 'cloud.js', 'local-sync.js', 'study.js', 'session.js', 'pwa.js', 'style.css', 'study.css']) {
+    for (const file of ['app.js', 'cloud.js', 'github-sync.js', 'study.js', 'session.js', 'pwa.js', 'style.css', 'study.css']) {
       assert.ok(launchHtml.includes(`"${file}?launch=${token}"`), file);
       const asset = await fetch(`${base}/${file}?launch=${token}`);
       assert.equal(asset.status, 200); assert.equal(await asset.text(), fs.readFileSync(path.join(publicDir, file), 'utf8'));

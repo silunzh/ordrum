@@ -378,7 +378,7 @@ function openDialog(title, body) {
 }
 function closeDialog() { $('#app-dialog').close(); }
 function showHelp() {
-  openDialog('关于你的单词室',`<h3>先选章节，再挑一个练习方式</h3><p>「预览」查看词义和词形；「翻卡片」先回想，再翻面；「听写」反复听读并写下瑞典语。单词卡沿用原书的章节，同一词语可能在不同章节出现。</p><h3>词义与词形</h3><p>单词卡从你提供的 Rivstart A1/A2 Ordkort 提取。英文释义与语法形式由公开词典自动匹配，可能有多义词或短语未完全匹配。缺失内容会明确标出，可点「编辑」补充或订正。请结合教材语境理解。</p><p>名词展示可查到的单数不定、单数定、复数不定、复数定形式；动词展示可查到的命令式、不定式、现在、过去、完成式。没有可靠匹配的形式留空。</p><h3>听读与听写</h3><p>${Object.keys(audioMap).length ? '已内置瑞典语合成发音；词形和你自行补充的内容使用浏览器提供的瑞典语语音。' : '听读使用浏览器中可用的瑞典语语音。'}可在右上角调整语速。听写每到一个新词会自动播放，输入后按回车检查；答对后再次回车进入下一词，答错后再次回车重新听写本词并播放音频。听写保留 å、ä、ö 的区别，忽略大小写、多余空格和句末标点。</p><h3>你的学习记录</h3><p>可以用已选章节或整本书创建学习任务。每个任务分别记录掌握进度、错词和学习位置；刷新或重新打开网页可继续。错题本可按任务、章节、状态筛选，批量重练、标为掌握或删除。任务可重命名、归档、重置和删除。章节选择、任务、错题与修改会保存在此设备；在线版登录同一账号后，会在电脑、手机及主屏幕 App 之间自动同步。同步状态显示在学习模式旁。离线时先保存在本机，联网后合并上传。右上角的备份按钮可以导出或导入全部记录。清理浏览器数据会清除本地记录，请按需备份。</p><h3>资料来源与许可</h3><p>教材：Rivstart A1/A2 Ordkort，来自你提供的 PDF。教材内容用于你的个人学习。词典来源：</p><a class="source-link" href="https://folkets-lexikon.csc.kth.se/folkets/om.en.html" target="_blank" rel="noopener noreferrer">Folkets lexikon · 英文释义 · CC BY-SA 2.5</a><a class="source-link" href="https://sprakbanken.se/en/resources/saldom" target="_blank" rel="noopener noreferrer">Språkbanken Text · SALDO 瑞典语词形 · CC BY 4.0</a><div class="dialog-actions"><button class="primary-button" data-action="close-dialog">开始学习</button></div>`);
+  openDialog('关于你的单词室',`<h3>先选章节，再挑一个练习方式</h3><p>「预览」查看词义和词形；「翻卡片」先回想，再翻面；「听写」反复听读并写下瑞典语。单词卡沿用原书的章节，同一词语可能在不同章节出现。</p><h3>词义与词形</h3><p>单词卡从你提供的 Rivstart A1/A2 Ordkort 提取。英文释义与语法形式由公开词典自动匹配，可能有多义词或短语未完全匹配。缺失内容会明确标出，可点「编辑」补充或订正。请结合教材语境理解。</p><p>名词展示可查到的单数不定、单数定、复数不定、复数定形式；动词展示可查到的命令式、不定式、现在、过去、完成式。没有可靠匹配的形式留空。</p><h3>听读与听写</h3><p>${Object.keys(audioMap).length ? '已内置瑞典语合成发音；词形和你自行补充的内容使用浏览器提供的瑞典语语音。' : '听读使用浏览器中可用的瑞典语语音。'}可在右上角调整语速。听写每到一个新词会自动播放，输入后按回车检查；答对后再次回车进入下一词，答错后再次回车重新听写本词并播放音频。听写保留 å、ä、ö 的区别，忽略大小写、多余空格和句末标点。</p><h3>你的学习记录</h3><p>可以用已选章节或整本书创建学习任务。每个任务分别记录掌握进度、错词和学习位置；刷新或重新打开网页可继续。错题本可按任务、章节、状态筛选，批量重练、标为掌握或删除。任务可重命名、归档、重置和删除。章节选择、任务、错题与修改会保存在此设备；在顶部「同步设置」连接同一个 GitHub 私有进度仓库后，会在电脑、手机及主屏幕 App 之间自动同步。同步状态显示在学习模式旁。离线时先保存在本机，联网后合并上传。右上角的备份按钮可以导出或导入全部记录。清理浏览器数据会清除本地记录，请按需备份。</p><h3>资料来源与许可</h3><p>教材：Rivstart A1/A2 Ordkort，来自你提供的 PDF。教材内容用于你的个人学习。词典来源：</p><a class="source-link" href="https://folkets-lexikon.csc.kth.se/folkets/om.en.html" target="_blank" rel="noopener noreferrer">Folkets lexikon · 英文释义 · CC BY-SA 2.5</a><a class="source-link" href="https://sprakbanken.se/en/resources/saldom" target="_blank" rel="noopener noreferrer">Språkbanken Text · SALDO 瑞典语词形 · CC BY 4.0</a><div class="dialog-actions"><button class="primary-button" data-action="close-dialog">开始学习</button></div>`);
 }
 function showAudioSettings() {
   const builtin = Object.keys(audioMap).length;
@@ -394,7 +394,7 @@ function showEdit(id) {
   if (!base) return;
   const word = wordFor(base);
   const forms = visibleForms(word);
-  openDialog(`编辑 · ${word.swedish}`,`<form id="edit-word-form" data-id="${esc(id)}"><p>补充你在教材中遇到的意思，或订正自动匹配的词形。</p><label for="edit-english">英文释义</label><textarea id="edit-english" lang="en" placeholder="写下英文释义…">${esc(word.english || '')}</textarea><label for="edit-pos">词性</label><input id="edit-pos" value="${esc(word.pos || '')}" placeholder="noun / verb / adjective / phrase…"><label>词形 · 点「添加」可补充更多形式</label><div class="edit-forms" id="edit-forms">${forms.map(form => formEditRow(form.label,form.value)).join('')}</div><button type="button" class="add-form" data-action="add-form">＋ 添加词形</button><div class="form-source">修改保存在学习记录中，在线登录后会同步，并包含在备份中。原书中的瑞典语词条保留不变。</div><div class="dialog-actions">${state.overrides[id] ? `<button type="button" class="secondary-button" data-action="restore-word" data-id="${esc(id)}">恢复词典内容</button>` : ''}<button type="submit" class="primary-button">保存修改</button></div></form>`);
+  openDialog(`编辑 · ${word.swedish}`,`<form id="edit-word-form" data-id="${esc(id)}"><p>补充你在教材中遇到的意思，或订正自动匹配的词形。</p><label for="edit-english">英文释义</label><textarea id="edit-english" lang="en" placeholder="写下英文释义…">${esc(word.english || '')}</textarea><label for="edit-pos">词性</label><input id="edit-pos" value="${esc(word.pos || '')}" placeholder="noun / verb / adjective / phrase…"><label>词形 · 点「添加」可补充更多形式</label><div class="edit-forms" id="edit-forms">${forms.map(form => formEditRow(form.label,form.value)).join('')}</div><button type="button" class="add-form" data-action="add-form">＋ 添加词形</button><div class="form-source">修改保存在学习记录中，连接 GitHub 私有进度仓库后会同步，并包含在备份中。原书中的瑞典语词条保留不变。</div><div class="dialog-actions">${state.overrides[id] ? `<button type="button" class="secondary-button" data-action="restore-word" data-id="${esc(id)}">恢复词典内容</button>` : ''}<button type="submit" class="primary-button">保存修改</button></div></form>`);
   $('#edit-word-form').addEventListener('submit',event => {
     event.preventDefault();
     const forms = $$('.edit-form-row').map(row => ({label:$('.form-label-input',row).value.trim() || '词形',value:$('.form-value-input',row).value.trim()})).filter(form => form.value);
@@ -404,7 +404,7 @@ function showEdit(id) {
 }
 function showProgress() {
   const known = data.words.filter(word => (typeof state.marks[word.id] === 'string' ? state.marks[word.id] : state.marks[word.id]?.status) === 'known').length;
-  openDialog('把你的进度带走',`<p>全书共有 <b>${known}</b> 张卡片标为已掌握，<b>${state.tasks.length}</b> 个学习任务，错题本有 <b>${Object.keys(state.notebook).length}</b> 个词条，<b>${Object.keys(state.overrides).length}</b> 个词条有你的修改。记录同时保存在此设备；在线登录后可与同一账号的其他设备同步。</p><div class="progress-actions"><button class="secondary-button" data-action="export-progress">${icon('download')}导出学习记录</button><button class="secondary-button" data-action="import-progress">${icon('upload')}从备份恢复记录</button></div><p style="font-size:10px;margin-top:18px">备份包含任务、错题本、学习位置、章节选择、掌握标记、发音设置和手动修改。导入会合并任务与错题；已有的学习位置优先保留。清理浏览器数据前请先备份。</p>`);
+  openDialog('把你的进度带走',`<p>全书共有 <b>${known}</b> 张卡片标为已掌握，<b>${state.tasks.length}</b> 个学习任务，错题本有 <b>${Object.keys(state.notebook).length}</b> 个词条，<b>${Object.keys(state.overrides).length}</b> 个词条有你的修改。记录同时保存在此设备；连接同一个 GitHub 私有进度仓库后，可与其他设备自动同步。</p><div class="progress-actions"><button class="secondary-button" data-action="export-progress">${icon('download')}导出学习记录</button><button class="secondary-button" data-action="import-progress">${icon('upload')}从备份恢复记录</button></div><p style="font-size:10px;margin-top:18px">备份包含任务、错题本、学习位置、章节选择、掌握标记、发音设置和手动修改。导入会合并任务与错题；已有的学习位置优先保留。清理浏览器数据前请先备份。</p>`);
 }
 function exportProgress() {
   captureStudySession();
@@ -588,7 +588,7 @@ async function init() {
     $('#source-footer').textContent = `${data.book.title} · ${data.chapters.length} 章 · ${data.words.length} 张卡片`;
     restoreSavedStudy(); renderChapters(); renderSummary(); renderMode();
     window.OrdrumCloud?.start({
-      ...(window.OrdrumLocalSync?.cloudOptions(notify) || {}),
+      ...(window.OrdrumGitHubSync?.cloudOptions(notify) || {}),
       getState:() => { captureStudySession(); return JSON.parse(JSON.stringify(state)); },
       normalise:normaliseCloudState,
       emptyState:emptyStudyState,

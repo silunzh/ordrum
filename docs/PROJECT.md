@@ -1,6 +1,6 @@
 # 项目目录与文件用途
 
-日常修改网页时，从 `public/` 开始。`app/` 提供网页入口、登录辅助和进度接口；`dist/` 是构建产物，无需手动修改。
+日常修改网页时，从 `public/` 开始。当前网页只由 GitHub Pages 或本地静态服务提供；`app/` 是旧 Sites 迁移参考；`dist/` 是构建产物，无需手动修改。
 
 ```text
 ordrum/
@@ -11,8 +11,9 @@ ordrum/
 │   ├── study.js/.css        学习任务与错题本
 │   ├── session.js           学习位置、听写草稿与恢复
 │   ├── cloud.js             账号隔离与自动同步
-│   ├── local-sync.js        Mac 本地网页与在线账号窗口的连接
-│   ├── sync-bridge.js       账号窗口内的受限进度转发
+│   ├── github-sync.js       私有 GitHub 进度仓库连接、凭据和传输
+│   ├── local-sync.js        旧账号桥参考，不参与静态发布
+│   ├── sync-bridge.js       旧服务参考，不参与静态发布
 │   ├── pwa.js               安装提示与 App 更新
 │   ├── service-worker.js    界面、词库和已播放音频的离线缓存
 │   ├── manifest.webmanifest App 名称、图标与启动配置
@@ -46,8 +47,8 @@ ordrum/
 | 修改听写判分、翻卡和词形显示 | `public/app.js` |
 | 修改任务管理和错题本 | `public/study.js`、`public/study.css` |
 | 修改保存位置和恢复草稿 | `public/session.js` |
-| 修改跨设备同步 | `public/cloud.js`、`app/api/progress/route.ts` |
-| 修改 Mac 本地账号连接 | `public/local-sync.js`、`public/sync-bridge.js`、`app/sync-bridge/route.ts` |
+| 修改跨设备同步 | `public/cloud.js`、`public/github-sync.js` |
+| 修改同步连接设置 | `public/github-sync.js`、`docs/SYNC.md` |
 | 修改安装、更新和离线使用 | `public/pwa.js`、`public/service-worker.js`、`public/manifest.webmanifest` |
 | 修改数据库结构 | `db/schema.ts`，再生成新的 `drizzle/` 迁移 |
 
@@ -57,8 +58,8 @@ ordrum/
 
 词库的卡片 ID、瑞典语原文、章节和页码对应原始词卡。释义、词形及发音来源保存在 `public/DICTIONARY-SOURCES.md`、`dictionary-provenance.json` 和 `audio-provenance.json` 中，应和词库、音频一同保留。
 
-学习记录保存在浏览器及登录账号的线上数据库中。项目里的 `.wrangler/` 是独立的本地数据库和运行状态；`.sites-runtime/`、`.vinext/`、`.next/` 是本机开发工具状态。整理源码时不应将这些目录当作学习数据备份，也不要直接清除本地数据库。
+当前学习记录保存在浏览器及独立 GitHub 私有进度仓库中。旧数据库不参与新同步。项目里的 `.wrangler/` 是独立的本地数据库和运行状态；`.sites-runtime/`、`.vinext/`、`.next/` 是本机开发工具状态。整理源码时不应将这些目录当作学习数据备份，也不要直接清除本地数据库。
 
 `node_modules/` 是依赖，`dist/` 是生成的部署产物；`outputs/`、`work/` 和 `.tmp/` 存放已有输出或工作文件。这些目录均不属于日常编辑网页的入口。
 
-Sites 的构建、预览和连接器辅助文件保留在 `scripts/`、`worker/`、`lib/` 中。它们参与本地或线上运行，和 `public/` 中的学习界面分开维护。
+旧 Sites 的构建、预览和连接器辅助文件保留在 `scripts/`、`worker/`、`lib/` 中。它们仅供历史迁移参考；当前学习入口不依赖它们。同步机制见 `docs/SYNC.md`。

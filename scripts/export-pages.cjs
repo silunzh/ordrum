@@ -1,4 +1,4 @@
-// Export the static learning app only; the authenticated API stays on Sites.
+// Export the static learning app only; private progress stays in a separate GitHub repository.
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -18,7 +18,7 @@ function exportPages() {
       const file = path.join(directory, entry.name);
       const name = path.posix.join(relative, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`Symlinks cannot be exported: ${name}`);
-      if (entry.name.startsWith('.') || entry.name.toUpperCase() === 'CNAME' || name === 'sync-bridge.js') continue;
+      if (entry.name.startsWith('.') || entry.name.toUpperCase() === 'CNAME' || ['sync-bridge.js', 'local-sync.js'].includes(name)) continue;
       if (entry.isDirectory()) collect(file, name);
       else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) files.push(name);
     }
@@ -29,7 +29,7 @@ function exportPages() {
   if (fs.existsSync(parent) && fs.lstatSync(parent).isSymbolicLink()) throw new Error('The output parent must not be a symlink.');
   if (fs.existsSync(output) && fs.lstatSync(output).isSymbolicLink()) throw new Error('The output directory must not be a symlink.');
   fs.mkdirSync(parent, {recursive: true});
-  fs.rmSync(output, {recursive: true, force: true});
+  fs.rmSync(output, {recursive: true, force: true, maxRetries: 3, retryDelay: 100});
   fs.mkdirSync(output);
   for (const name of files) {
     const destination = path.join(output, name);

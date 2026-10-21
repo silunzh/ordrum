@@ -15,8 +15,8 @@ let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`PASS ${name}`); }
 
 test('Pages exports static learning assets and attribution without server or runtime files', () => {
-  for (const name of ['index.html', 'app.js', 'local-sync.js', 'vocab.json', 'audio-map.json', 'DICTIONARY-SOURCES.md', 'dictionary-provenance.json', 'audio-provenance.json', '.nojekyll']) assert.ok(fs.existsSync(path.join(output, name)), name);
-  for (const name of ['sync-bridge.js', 'CNAME', '.openai', '.git', '.wrangler', 'app', 'db', 'drizzle', 'package.json', 'node_modules']) assert.ok(!fs.existsSync(path.join(output, name)), name);
+  for (const name of ['index.html', 'app.js', 'github-sync.js', 'vocab.json', 'audio-map.json', 'DICTIONARY-SOURCES.md', 'dictionary-provenance.json', 'audio-provenance.json', '.nojekyll']) assert.ok(fs.existsSync(path.join(output, name)), name);
+  for (const name of ['sync-bridge.js', 'local-sync.js', 'progress.json', 'CNAME', '.openai', '.git', '.wrangler', 'app', 'db', 'drizzle', 'package.json', 'node_modules']) assert.ok(!fs.existsSync(path.join(output, name)), name);
   assert.deepEqual(fs.readFileSync(path.join(source, 'service-worker.js')), before);
   const vocabulary = JSON.parse(fs.readFileSync(path.join(output, 'vocab.json')));
   assert.equal(vocabulary.words.length, 1332); assert.equal(vocabulary.chapters.length, 20);

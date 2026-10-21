@@ -74,12 +74,12 @@
     if (config?.onStatus) config.onStatus(code,detail);
     const element = document.querySelector('#cloud-status');
     if (!element) return;
-    const labels = {connecting:'正在连接云端',syncing:'正在同步学习进度',synced:'学习进度已同步',offline:'离线学习 · 联网后同步',signin:'登录以同步学习进度',local:'本地学习 · 云同步需打开在线版',error:'已保存在此设备 · 等待重试',limit:'进度已保存本机 · 云端记录过大'};
+    const labels = {connecting:'正在连接云端',syncing:'正在同步学习进度',synced:'学习进度已同步',offline:'离线学习 · 联网后同步',signin:'登录以同步学习进度',local:'进度已保存本机 · 连接账号后同步',error:'已保存在此设备 · 等待重试',limit:'进度已保存本机 · 云端记录过大'};
     const customLabel = code === 'local' ? config?.localLabel : code === 'signin' ? config?.signInLabel : null;
     element.textContent = customLabel || labels[code] || labels.error;
     element.dataset.status = code;
     element.title = detail || '';
-    element.href = code === 'local' ? config?.localHref || 'https://ordrum-rivstart-silun.genialcomet16.chatgpt.site' : code === 'signin' ? config?.signInHref || '/signin-with-chatgpt?return_to=%2F' : '#';
+    element.href = code === 'local' ? config?.localHref || '#' : code === 'signin' ? config?.signInHref || '/signin-with-chatgpt?return_to=%2F' : '#';
   }
   function apply(next,commitId) {
     applying = true;
@@ -139,23 +139,31 @@
       // A failed account switch must not reclassify subsequent edits to the
       // previous account as changes belonging to the newly signed-in account.
       if (journal.replaceAccount && validMetadata(journal.previousMetadata) && !write(ACCOUNT_PREFIX+journal.previousMetadata.accountId,{state:current,metadata:journal.previousMetadata})) throw new Error('Cannot preserve the previous account on this device');
-      const next = config.normalise(journal.replaceAccount ? copy(journal.merged) : mergeThreeWay(journal.before,current,journal.merged));
+      // An explicitly authorized provider migration imports the old account's
+      // records. Preserve edits made before recovery; ordinary account switches
+      // must still replace rather than import another account's state.
+      const next = config.normalise(journal.replaceAccount && !journal.providerMigration ? copy(journal.merged) : mergeThreeWay(journal.before,current,journal.merged));
       if (!equal(current,next)) apply(next,journal.id);
     }
     if (!persistLocal(localState(),journal.id) || !write(META_KEY,journal.metadata)) throw new Error('Cannot preserve sync state');
     metadata = copy(journal.metadata);
+    if (journal.providerMigration && typeof config.onProviderMigrationCommitted === 'function') {
+      const result = config.onProviderMigrationCommitted({fromAccountId:journal.previousMetadata.accountId,toAccountId:journal.metadata.accountId});
+      if (result === false || result && typeof result.then === 'function') throw new Error('Cannot finish provider migration');
+    }
     remove(JOURNAL_KEY);
   }
   function recoverJournal() {
     const journal = read(JOURNAL_KEY);
     if (!journal) return;
-    if (!object(journal) || journal.version !== 1 || typeof journal.id !== 'string' || !object(journal.before) || !object(journal.merged) || !validMetadata(journal.metadata) || (journal.replaceAccount && !validMetadata(journal.previousMetadata))) throw new Error('Invalid sync recovery record');
+    if (!object(journal) || journal.version !== 1 || typeof journal.id !== 'string' || !object(journal.before) || !object(journal.merged) || !validMetadata(journal.metadata) || (journal.replaceAccount && !validMetadata(journal.previousMetadata)) || (own(journal,'providerMigration') && (journal.providerMigration !== true || journal.replaceAccount !== true || journal.previousMetadata?.accountId === journal.metadata.accountId))) throw new Error('Invalid sync recovery record');
     finishJournal(journal);
   }
-  function commitMerge(local,merged,nextMetadata,replaceAccount = false) {
+  function commitMerge(local,merged,nextMetadata,replaceAccount = false,providerMigration = false) {
     const random = global.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     const journal = {version:1,id:random,before:copy(local),merged:copy(merged),metadata:copy(nextMetadata)};
     if (replaceAccount) { journal.replaceAccount = true; journal.previousMetadata = copy(metadata); }
+    if (providerMigration) journal.providerMigration = true;
     if (!write(JOURNAL_KEY,journal)) throw new Error('Cannot preserve sync recovery record');
     finishJournal(journal);
   }
@@ -167,6 +175,16 @@
     if (!archiveCurrent()) throw new Error('Cannot preserve the previous account on this device');
     const saved = read(ACCOUNT_PREFIX+remote.accountId);
     const savedMetadata = saved?.metadata?.accountId === remote.accountId && validMetadata(saved.metadata) ? saved.metadata : null;
+    const migration = {fromAccountId:metadata.accountId,toAccountId:remote.accountId};
+    if (typeof config.allowProviderMigration === 'function' && config.allowProviderMigration(migration) === true) {
+      const local = localState();
+      const target = saved?.state ? mergeThreeWay(savedMetadata?.base || undefined,saved.state,remote.state || undefined) : remote.state || undefined;
+      const next = config.normalise(mergeThreeWay(undefined,local,target));
+      // The grant applies only to this account pair. Persist the authorization
+      // in the recovery journal before consuming it after the durable commit.
+      commitMerge(local,next,{accountId:remote.accountId,revision:remote.revision,base:copy(remote.state)},true,true);
+      return;
+    }
     const next = config.normalise(saved?.state || remote.state || config.emptyState());
     // Do not transmit a previous account's browser-local records to a new account.
     commitMerge(localState(),next,savedMetadata || {accountId:remote.accountId,revision:remote.revision,base:copy(remote.state)},true);
@@ -221,7 +239,8 @@
     clearTimeout(timer); timer = null;
     if (global.navigator?.onLine === false) { status('offline'); return; }
     if (!connected()) { status('local'); return; }
-    timer = setTimeout(sync,1000);
+    const delay = Number.isFinite(config.debounceMs) && config.debounceMs >= 0 ? config.debounceMs : 1000;
+    timer = setTimeout(sync,delay);
   }
   function start(options) {
     config = options;
@@ -229,7 +248,8 @@
     if (metadata && !validMetadata(metadata)) metadata = null;
     started = true;
     if (!poll) {
-      poll = setInterval(() => { if (document.visibilityState !== 'hidden') sync(); },20000);
+      const interval = Number.isFinite(config.pollIntervalMs) && config.pollIntervalMs > 0 ? config.pollIntervalMs : 20000;
+      poll = setInterval(() => { if (document.visibilityState !== 'hidden') sync(); },interval);
       global.addEventListener('online',sync);
       global.addEventListener('offline',() => { clearTimeout(timer); timer = null; abortRequest?.(); status('offline'); });
       global.addEventListener('focus',sync);

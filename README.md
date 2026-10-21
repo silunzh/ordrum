@@ -4,15 +4,15 @@ Rivstart A1/A2 Ordkort 学习网页与 iPhone 主屏幕 App，含 20 章、1,332
 
 ## 在线与 iPhone
 
-GitHub Pages 地址：[Ordrum](https://silunzh.github.io/ordrum/)。首次在页面顶部点“连接学习账号”，在弹出的账号窗口登录原来的 ChatGPT 账号并确认连接，然后保持该窗口打开。学习任务、掌握进度、错题本和学习位置会自动合并同步。以“学习进度已同步”为完成标志；离线修改先保存在设备，恢复联网并连接后上传。
+GitHub Pages 地址：[Ordrum](https://silunzh.github.io/ordrum/)。Mac 双击 `启动网页.command` 可继续使用 http://127.0.0.1:8765。两种入口使用相同网页和同步机制，不需要旧 Sites 账号窗口。
 
-原来的[账号服务与在线网页](https://ordrum-rivstart-silun.genialcomet16.chatgpt.site)继续可用，保存同一份账号记录。GitHub 只提供网页和学习资源，不保存个人学习数据库或登录凭据。从旧地址迁移后，连接同一账号即可恢复进度，无需手动导入。
+学习记录保存在设备，并自动同步至独立的 **私有** [silunzh/ordrum-progress](https://github.com/silunzh/ordrum-progress) 仓库的 `progress.json`。此公开代码仓库不保存个人学习记录或访问令牌。
 
-在 iPhone 的 Safari 打开在线地址，点“分享”→“添加到主屏幕”，如有“作为网页 App 打开”开关，保持开启，再点“添加”。也可点网页右上角的 iPhone App 按钮查看说明。主屏幕 App 包含预览、翻卡片、听写和任务管理全部功能。
+首次使用，在顶部点「同步设置」，填写 GitHub 用户名、私有进度仓库名和仅限该仓库的 fine-grained personal access token。令牌只需 Repository permissions → Contents: Read and write；不要授权个人主页或其他仓库。详细配置和同步规则见 [docs/SYNC.md](docs/SYNC.md)。勾选「在此浏览器记住连接」后，重新打开可自动连接；不勾选只在当前会话保留。令牌仅发给 GitHub API，不进入学习备份或代码。请直接在应用中填写，不要发送到聊天。
 
-首次安装后，主屏幕 App 的本地存储与 Safari 可能分开；在两处使用同一账号即可从云端恢复。界面与词库准备完成后可离线使用，音频在联网播放时逐步缓存。iPhone 可能需要先点按一次播放按钮，才允许自动播放。离线状态不能登录或跨设备同步。
+连接同一账号和同一私有仓库后，任务、错题、词条修改和学习位置会自动合并，以「学习进度已同步」为完成标志。学习变化延迟几秒上传；打开或返回页面时同步，前台每两分钟检查另一设备的更新。离线修改留在本机，联网后自动合并。首次迁移可明确选择合并此设备的现有记录；之后换账号或仓库仍保持隔离。
 
-本机 `127.0.0.1` 网页也可以直接同步。双击 `启动网页.command` 后，点页面顶部或学习区的“连接线上账号”；在在线窗口中登录同一账号并点“连接此本地网页”。请保持该账号窗口打开，本地和线上记录会自动合并，无需导出、导入。以“学习进度已同步”为完成标志；“已连接账号窗口”只表示连接已建立。刷新本地网页可重新接回仍打开的账号窗口；重新启动浏览器或关闭连接窗口后，请再连接一次。若连接窗口长时间无响应，重新点“账号连接”即可重新连接。离线修改保留在本机，恢复联网并连接后会同步。备份导出、导入仍可用于手动恢复。
+iPhone 在 Safari 打开新网址，点「分享」→「添加到主屏幕」。主屏幕 App 与 Safari 可能使用不同存储，两处都需配置同一个私有仓库。无需保持额外窗口打开。界面和词库准备好后可离线使用；音频在联网播放时逐步缓存。iPhone 可能需要先点按播放按钮才允许自动发音。
 
 ## 学习
 
@@ -26,23 +26,19 @@ GitHub Pages 地址：[Ordrum](https://silunzh.github.io/ordrum/)。首次在页
 
 ## 本地开发
 
-网页源文件在 `public/`，由 Vinext / Cloudflare Workers 提供线上服务，D1 保存各登录用户的独立快照。无需自行配置 OAuth 或 API 密钥。
+网页源文件在 `public/`。本地静态服务只需要 Node.js：运行 `npm run local`，或双击 `启动网页.command`，无需安装依赖。GitHub Pages 和本地网页直接调用 GitHub API，不经过本地服务器转发令牌。
 
-需要 Node.js >=22.13。首次使用运行 `npm run install:ci`；已有依赖时运行 `npm run dev`。本地预览默认端口 5173，`/signin-with-chatgpt?return_to=/` 使用 starter 提供的本地模拟账号。本地 D1 需要在构建后应用 `drizzle/` 中尚未应用的迁移，具体命令遵循 Sites starter。
+本地学习使用固定的 127.0.0.1:8765，保留原有浏览器进度。启动器会加载当前脚本以避开旧离线缓存。更新后请关闭原启动窗口，再重新启动；不要清理浏览器记录。
 
-`启动网页.command` 或 `npm run local` 启动本机学习页面（默认 http://127.0.0.1:8765）。本地页面通过用户确认的在线账号窗口连接真实云端；登录凭据只在在线网站中管理，不写入本地项目，也不向本地服务器转发。框架预览的模拟账号和本地测试数据库仍与真实线上账号独立。
+运行 `npm test` 验证学习、账号隔离、迁移中断恢复、GitHub SHA 冲突和离线缓存。发布前运行 `node scripts/version-pwa.cjs`。`node scripts/export-pages.cjs` 生成 `outputs/github-pages/`，无需项目依赖。目录说明见 [docs/PROJECT.md](docs/PROJECT.md)。
 
-Node 启动器会用新的启动地址加载当前界面和脚本，避免旧的离线缓存隐藏新功能；端口和浏览器学习记录不变。更新启动器后，先在原启动窗口按 Control+C，再双击重新启动。若只有 Python 可用，请按页面提示完成版本更新。
-
-运行 `npm test` 检查学习逻辑、云合并、账号隔离、数据库版本竞争和 PWA 缓存。发布前运行 `node scripts/version-pwa.cjs` 再构建，确保离线界面缓存对应本次版本。`dist/` 是生成的部署产物，修改 `public/` 而非生成文件。发布使用 Sites 工作流，保留现有项目 ID 和访问范围。
-
-目录说明及编辑入口见 [docs/PROJECT.md](docs/PROJECT.md)。`node_modules/`、`dist/` 和隐藏运行目录均为依赖或生成文件，日常修改 `app/`、`public/`、`db/`、`scripts/` 和 `tests/`。
+旧 Sites 的 `app/`、`db/`、`drizzle/`、`worker/`、`lib/` 及相关测试暂作历史迁移参考，不参与当前静态发布；不应重新发布旧服务或把数据库、备份和运行目录上传到公开仓库。
 
 ## GitHub Pages 发布
 
-独立仓库：[silunzh/ordrum](https://github.com/silunzh/ordrum)。`.github/workflows/pages.yml` 在 `main` 更新后检查并发布静态学习网页；`node scripts/export-pages.cjs` 可在本机生成相同的 `outputs/github-pages/` 产物，不需要密钥或安装项目依赖。
+独立公开仓库：[silunzh/ordrum](https://github.com/silunzh/ordrum)。`.github/workflows/pages.yml` 在 `main` 更新后检查同步逻辑，再发布静态网页。网站、安装和 Service Worker 均只在 `/ordrum/` 下，不修改个人主页仓库、根目录或域名。
 
-网站及 Service Worker 的范围是 `/ordrum/`；不修改个人主页仓库、根目录或域名。登录和进度接口继续在原在线服务内运行，必须先发布兼容 GitHub 来源的同步桥，再发布 Pages。GitHub 网页和 Mac 本地网页均需首次确认账号连接；关闭账号窗口后可从页面顶部重新连接。
+导出包排除旧账号桥、服务器、数据库、备份、凭据与本机状态。私有进度仓库应始终保持 Private，不启用 Pages。
 
 ## 数据与许可
 
