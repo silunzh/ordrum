@@ -1,0 +1,18 @@
+{
+  "id": "./",
+  "name": "Ordrum · 瑞典语单词室",
+  "short_name": "Ordrum",
+  "description": "按章节预览、翻卡片、听写，保存学习任务与单词进度。",
+  "lang": "zh-CN",
+  "start_url": "./?source=homescreen",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f7f2",
+  "theme_color": "#edf0e8",
+  "orientation": "any",
+  "icons": [
+    {"src":"icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"icons/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ]
+}

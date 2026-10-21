@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#edf0e8">
+  <meta name="description" content="你的瑞典语单词室。选择 Rivstart A1/A2 章节，预览、翻卡片、听写，按自己的节奏练习。">
+  <title>Ordrum · 瑞典语单词室</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Ordrum">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="study.css">
+  <script src="study.js" defer></script>
+  <script src="session.js" defer></script>
+  <script src="local-sync.js" defer></script>
+  <script src="cloud.js" defer></script>
+  <script src="app.js" defer></script>
+  <script src="pwa.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Ordrum 首页"><span class="brand-icon" aria-hidden="true">ö</span><span>ordrum<span class="brand-subtitle">瑞典语单词室</span></span></a>
+      <nav class="header-actions" aria-label="工具">
+        <button class="quiet-button sync-account-button" id="sync-account-button" hidden>连接线上账号</button>
+        <button class="quiet-button icon-label" id="install-app-button" aria-label="安装或查看 iPhone App"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 5h4m-3 14h2"/></svg><span>iPhone App</span></button>
+        <button class="quiet-button icon-label" id="tasks-button"><span data-icon="cards"></span><span>学习任务</span></button>
+        <button class="quiet-button icon-label" id="notebook-button"><span data-icon="book"></span><span>错题本</span></button>
+        <button class="quiet-button icon-label" id="audio-settings-button" aria-label="发音设置"><span data-icon="sound"></span><span>发音设置</span></button>
+        <button class="quiet-button icon-label" id="help-button" aria-label="使用说明"><span data-icon="help"></span><span>使用说明</span></button>
+        <button class="avatar-button" id="progress-button" title="备份与恢复学习记录" aria-label="备份与恢复学习记录"><span data-icon="archive"></span></button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div class="intro-copy"><div class="eyebrow"><span></span> EN LITEN STUND, VARJE DAG</div><h1 id="page-title">让单词，慢慢成为日常<span>。</span></h1><p>一章一章学，一遍一遍记。给你的瑞典语留一点时间。</p></div>
+        <div class="daily-note"><span class="note-flower" aria-hidden="true">✳</span><div><span class="note-swedish">Lite i taget.</span><span class="note-chinese">每次一点点，也是在向前。</span></div></div>
+      </section>
+
+      <div class="workspace">
+        <aside class="library-panel" aria-label="书籍和章节">
+          <div class="panel-eyebrow">我的书架 <span>01</span></div>
+          <label class="sr-only" for="book-select">选择书籍</label>
+          <div class="book-select-wrap"><span class="book-symbol" data-icon="book"></span><select id="book-select"><option>Rivstart A1/A2</option></select></div>
+          <div class="book-caption">ORDKORT · 单词卡</div>
+          <div class="chapter-heading"><h2>选择章节</h2><div><button class="text-button" id="select-all">全选</button><span>·</span><button class="text-button" id="select-none">清空</button></div></div>
+          <div id="chapter-list" class="chapter-list"><div class="loading-small">正在整理书架…</div></div>
+          <button class="secondary-button study-create-sidebar" id="create-task-button">＋ 创建学习任务</button>
+          <div class="library-footer"><span data-icon="leaf"></span><p>不用一次学完。<br>选好今天的一小步。</p></div>
+        </aside>
+
+        <section class="learning-panel" aria-label="学习区">
+          <div id="local-sync-context" hidden></div>
+          <div id="task-context"></div>
+          <div class="learning-heading"><div><div class="section-kicker">你的学习范围</div><h2 id="selection-title">正在加载单词…</h2><p id="selection-description">从书里的第一章开始。</p></div><div class="learned-summary"><span class="learned-icon" data-icon="check"></span><div><strong id="known-count">0</strong><span>已掌握</span></div></div></div>
+          <div class="mode-toolbar"><div class="mode-tabs" role="tablist" aria-label="学习模式"><button id="tab-preview" class="mode-tab active" role="tab" aria-selected="true" aria-controls="mode-content" data-mode="preview"><span data-icon="grid"></span>预览</button><button id="tab-flashcard" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="flashcard"><span data-icon="cards"></span>翻卡片</button><button id="tab-dictation" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="dictation"><span data-icon="headphones"></span>听写</button></div><span class="local-save"><span></span><a id="cloud-status" href="#" aria-live="polite">进度保存在此设备</a></span></div>
+          <div id="mode-content" role="tabpanel" aria-labelledby="tab-preview"><div class="loading-state"><span class="spinner"></span><p>正在打开你的单词卡…</p></div></div>
+        </section>
+      </div>
+      <footer class="site-footer"><span>ordrum <span class="footer-dot">·</span> 一个安静的单词室</span><span id="source-footer">词条来自 Rivstart A1/A2 Ordkort</span></footer>
+    </main>
+  </div>
+  <dialog id="app-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+</body>
+</html>

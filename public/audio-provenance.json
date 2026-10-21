@@ -1,0 +1,9 @@
+{
+  "language": "sv-SE",
+  "type": "synthesized speech",
+  "voice": "Alva",
+  "rateWordsPerMinute": 145,
+  "uniqueCardTexts": 1065,
+  "generatedOn": "2026-10-20",
+  "note": "Card pronunciations are included. Grammatical annotation (adj.) is not spoken. Inflection pronunciations use browser Swedish speech when not included in audio-map.json."
+}
