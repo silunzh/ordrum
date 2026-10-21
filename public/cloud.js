@@ -11,6 +11,7 @@
   const copy = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
   const object = value => !!value && typeof value === 'object' && !Array.isArray(value);
   const own = (value,key) => object(value) && Object.prototype.hasOwnProperty.call(value,key);
+  const safeId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value) && !['__proto__','constructor','prototype'].includes(value);
   const time = value => Date.parse(value?.updatedAt || value?.updated || value?.lastWrongAt || '') || 0;
   function equal(a,b) {
     if (a === b) return true;
@@ -21,11 +22,14 @@
   }
   function cleanReviewPreferences(value) {
     if (typeof global.OrdrumReview?.cleanPreferences === 'function') return global.OrdrumReview.cleanPreferences(value);
-    const prefs = object(value) ? value : {}, proposed = prefs.intervals;
+    const prefs = object(value) ? value : {}, proposed = prefs.intervals, fresh = !Object.keys(prefs).length;
     const clamp = (value,fallback,max) => Number.isFinite(Number(value)) ? Math.min(max,Math.max(0,Math.floor(Number(value)))) : fallback;
     const intervals = Array.isArray(proposed) && proposed.length === 5 && proposed.every((day,index) => Number.isInteger(day) && day >= 1 && day <= 365 && (!index || day > proposed[index-1])) ? proposed.slice() : [1,3,7,14,30];
     const stamp = prefs.updatedAt !== null && prefs.updatedAt !== undefined && prefs.updatedAt !== '' && typeof prefs.updatedAt !== 'boolean' ? new Date(prefs.updatedAt) : null;
-    return {reviewLimit:clamp(prefs.reviewLimit,20,100),newLimit:clamp(prefs.newLimit,5,30),intervals,paused:prefs.paused === true,updatedAt:stamp && Number.isFinite(stamp.getTime()) ? stamp.toISOString() : '1970-01-01T00:00:00.000Z'};
+    const scope = object(prefs.scope) ? prefs.scope : {};
+    return {method:['recall','dictation','quick'].includes(prefs.method) ? prefs.method : 'recall',targetMinutes:Math.max(10,clamp(prefs.targetMinutes,60,180)),chunkSize:Math.max(10,clamp(prefs.chunkSize,20,25)),reviewLimit:clamp(prefs.reviewLimit,fresh ? 90 : 20,200),newLimit:clamp(prefs.newLimit,fresh ? 30 : 5,200),intervals,
+      scope:{kind:['selected','book','chapters','notebook'].includes(scope.kind) ? scope.kind : 'selected',chapterIds:Array.isArray(scope.chapterIds) ? [...new Set(scope.chapterIds.filter(id=>Number.isInteger(id) && id >= 1 && id <= 1000))].sort((a,b)=>a-b).slice(0,200) : [],notebookChapterIds:Array.isArray(scope.notebookChapterIds) ? [...new Set(scope.notebookChapterIds.filter(safeId))].slice(0,1000) : []},
+      paused:prefs.paused === true,updatedAt:stamp && Number.isFinite(stamp.getTime()) ? stamp.toISOString() : '1970-01-01T00:00:00.000Z'};
   }
   function mergeReviewEvents(local,remote) {
     if (typeof global.OrdrumReview?.mergeEvents === 'function') return global.OrdrumReview.mergeEvents(local,remote);
@@ -44,6 +48,63 @@
       if (dayNumber(day) === null || Math.abs(dayNumber(day)-dayNumber(at.slice(0,10))) > 1) return;
       const row = {id,wordId:event.wordId,sessionId:event.sessionId,mode:event.mode,outcome:event.outcome,at,day};
       if (!own(result,id) || JSON.stringify(row) < JSON.stringify(result[id])) result[id] = row;
+    });
+    return result;
+  }
+  function canonical(value) {
+    if (Array.isArray(value)) return '['+value.map(canonical).join(',')+']';
+    if (object(value)) return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}';
+    return JSON.stringify(value);
+  }
+  function latestWhole(left,right) {
+    return !left ? right : !right ? left : time(left) > time(right) ? left : time(right) > time(left) ? right : canonical(left) <= canonical(right) ? left : right;
+  }
+  function mergePlanSessions(...inputs) {
+    const result = {}, outcomes = ['known','again','correct','wrong','revealed','skip','seen'];
+    const maps = value => object(value) ? value : {};
+    const ids = value => Array.isArray(value) ? [...new Set(value.filter(safeId))] : [];
+    const metadata = value => object(value) ? Object.fromEntries(Object.entries(value).filter(([key])=>!['results','completedStages','resolvedStages','stageSessions','stageIndex','elapsedMs','__proto__','constructor','prototype'].includes(key))) : null;
+    for (const input of inputs) if (object(input)) Object.keys(input).sort().forEach(id=>{
+      const incoming = input[id];
+      if (!safeId(id) || !object(incoming) || incoming.id !== id) return;
+      const prior = result[id], row = copy(latestWhole(metadata(prior),metadata(incoming)));
+      row.results = {};
+      for (const source of [prior,incoming]) Object.keys(maps(source?.results)).sort().filter(safeId).forEach(stageId=>{
+        const stage = maps(source.results[stageId]);
+        Object.keys(stage).sort().filter(safeId).forEach(wordId=>{
+          const value = stage[wordId];
+          if (!object(value) || !outcomes.includes(value.outcome) || typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at))) return;
+          const answer = {outcome:value.outcome,at:new Date(value.at).toISOString()};
+          const target = row.results[stageId] || (row.results[stageId] = {}), previous = target[wordId];
+          // First attempts are immutable, including an initial wrong/revealed answer.
+          if (!previous || Date.parse(answer.at) < Date.parse(previous.at) || answer.at === previous.at && canonical(answer) < canonical(previous)) target[wordId] = answer;
+        });
+      });
+      row.completedStages = {};
+      for (const source of [prior,incoming]) Object.keys(maps(source?.completedStages)).sort().filter(safeId).forEach(stageId=>{if (source.completedStages[stageId] === true) row.completedStages[stageId] = true;});
+      row.resolvedStages = {};
+      for (const source of [prior,incoming]) Object.keys(maps(source?.resolvedStages)).sort().filter(safeId).forEach(stageId=>{
+        row.resolvedStages[stageId] = [...new Set([...(row.resolvedStages[stageId] || []),...ids(source.resolvedStages[stageId])])];
+      });
+      row.stageSessions = {};
+      for (const source of [prior,incoming]) Object.keys(maps(source?.stageSessions)).sort().filter(safeId).forEach(stageId=>{
+        const session = source.stageSessions[stageId];
+        if (object(session)) row.stageSessions[stageId] = copy(latestWhole(row.stageSessions[stageId],session));
+      });
+      row.elapsedMs = Math.max(0,...[prior,incoming].map(source=>Number.isFinite(source?.elapsedMs) ? source.elapsedMs : 0));
+      const stages = Array.isArray(row.stages) ? row.stages : [];
+      row.stageIndex = 0;
+      while (row.stageIndex < stages.length && safeId(stages[row.stageIndex]?.id) && row.completedStages[stages[row.stageIndex].id] === true) row.stageIndex++;
+      result[id] = row;
+    });
+    Object.keys(result).forEach(id=>{
+      const row = result[id];
+      Object.keys(row.resolvedStages).forEach(stageId=>{
+        const arrays = inputs.filter(input=>object(input?.[id]?.resolvedStages) && Array.isArray(input[id].resolvedStages[stageId])).map(input=>ids(input[id].resolvedStages[stageId]));
+        const baseline = Array.isArray(inputs[0]?.[id]?.resolvedStages?.[stageId]) ? ids(inputs[0][id].resolvedStages[stageId]) : arrays.sort((a,b)=>canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0)[0] || [];
+        const existing = new Set(baseline), combined = new Set(arrays.flat());
+        row.resolvedStages[stageId] = [...baseline,...Array.from(combined).filter(wordId=>!existing.has(wordId)).sort()];
+      });
     });
     return result;
   }
@@ -97,6 +158,7 @@
       // Apply these top-level policies even when an ancestor equality shortcut
       // would otherwise erase records omitted by an older device snapshot.
       if ([base,local,remote].some(value => own(value,'reviewEvents'))) result.reviewEvents = mergeReviewEvents(local?.reviewEvents,remote?.reviewEvents);
+      if ([base,local,remote].some(value => own(value,'planSessions'))) result.planSessions = mergePlanSessions(base?.planSessions,local?.planSessions,remote?.planSessions);
       if ([local,remote].some(value => own(value,'reviewPreferences'))) {
         const l = own(local,'reviewPreferences') ? cleanReviewPreferences(local.reviewPreferences) : null;
         const r = own(remote,'reviewPreferences') ? cleanReviewPreferences(remote.reviewPreferences) : null;
@@ -106,8 +168,9 @@
     return result;
   }
   function hasLocalProgress(value) {
-    if ((value.tasks || []).length || ['marks','overrides','notebook','notebookUnits','reviewEvents'].some(key => Object.keys(value[key] || {}).length)) return true;
-    if (!equal(cleanReviewPreferences(value.reviewPreferences),cleanReviewPreferences(undefined))) return true;
+    if ((value.tasks || []).length || ['marks','overrides','notebook','notebookUnits','reviewEvents','planSessions'].some(key => Object.keys(value[key] || {}).length)) return true;
+    const preferences = cleanReviewPreferences(value.reviewPreferences), defaults = cleanReviewPreferences(undefined);
+    if (!equal(preferences,defaults) && !equal(preferences,{...defaults,reviewLimit:20,newLimit:5})) return true;
     const sessions = [value.studySession,value.reviewSession?.session];
     return sessions.some(s => s && (s.mode !== 'preview' || s.flashIndex || s.dictationIndex || s.flipped || s.draft || s.dictationResult || Object.keys(s.dictationAnswers || {}).length));
   }
@@ -120,7 +183,7 @@
   function localState() { const value = copy(config.getState()); if (object(value)) delete value[COMMIT_MARKER]; return value; }
   function changeSummary(base,current) {
     const groups = {};
-    const maps = ['marks','overrides','notebook','notebookUnits','reviewEvents'];
+    const maps = ['marks','overrides','notebook','notebookUnits','reviewEvents','planSessions'];
     for (const key of maps) {
       const before = object(base?.[key]) ? base[key] : {}, after = object(current?.[key]) ? current[key] : {};
       const changed = [...new Set([...Object.keys(before),...Object.keys(after)])].filter(id => !equal(before[id],after[id])).length;
@@ -131,7 +194,7 @@
     const changedTasks = [...new Set([...Object.keys(beforeTasks),...Object.keys(afterTasks)])].filter(id => !equal(beforeTasks[id],afterTasks[id])).length;
     if (changedTasks) groups.tasks = changedTasks;
     const preferences = ['selectedChapters','selectedBook','selectedNotebookChapters','mode','layout','rate','autoPlay','voiceURI','activeTaskId','reviewPreferences'];
-    const positions = ['studySession','reviewSession'];
+    const positions = ['studySession','reviewSession','activePlanId'];
     if (preferences.some(key => !equal(base?.[key],current?.[key]))) groups.preferences = 1;
     if (positions.some(key => !equal(base?.[key],current?.[key]))) groups.positions = 1;
     return {knownBaseline:base !== undefined && base !== null,count:Object.values(groups).reduce((sum,n) => sum+n,0),groups};

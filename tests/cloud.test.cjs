@@ -467,9 +467,65 @@ async function test(name,fn){await fn();passed++;console.log(`PASS ${name}`);}
     }
   });
   await test('default normalized review preferences still allow a fresh phone to adopt the complete remote snapshot',async()=>{
-    const defaults={reviewLimit:20,newLimit:5,intervals:[1,3,7,14,30],paused:false,updatedAt:'1970-01-01T00:00:00.000Z'};
+    const defaults={method:'recall',targetMinutes:60,chunkSize:20,reviewLimit:90,newLimit:30,intervals:[1,3,7,14,30],scope:{kind:'selected',chapterIds:[],notebookChapterIds:[]},paused:false,updatedAt:'1970-01-01T00:00:00.000Z'};
     const remote={...empty(),mode:'dictation',reviewPreferences:{...defaults,reviewLimit:7,updatedAt:'2026-10-21T09:00:00.000Z'}};
     const app=harness({state:{...empty(),reviewPreferences:defaults,reviewEvents:{},notebookUnits:{}},network:async()=>reply(remote,5)});await app.start();assert.equal(app.requests.length,1);assert.equal(app.state.mode,'dictation');assert.deepEqual(app.state.reviewPreferences,remote.reviewPreferences);
+  });
+  await test('plan records and immutable first answers survive ancestor shortcuts and omitted snapshots',()=>{
+    const plan={id:'plan-one',status:'active',stageIndex:0,elapsedMs:1000,updatedAt:'2026-10-21T09:00:00Z',stages:[{id:'stage-one'}],results:{'stage-one':{word:{outcome:'wrong',at:'2026-10-21T09:00:00Z'}}}};
+    const base={planSessions:{'plan-one':plan}},missing={planSessions:{}};
+    for(const [left,right] of [[base,missing],[missing,base],[missing,missing]]){
+      const merged=clone(pure.mergeThreeWay(base,clone(left),clone(right)));assert.equal(merged.planSessions['plan-one'].results['stage-one'].word.outcome,'wrong');assert.equal(merged.planSessions['plan-one'].elapsedMs,1000);
+    }
+  });
+  await test('concurrent plan progress unions stages and first attempts with deterministic complete metadata',()=>{
+    const make=(updatedAt,status,results)=>({id:'plan-one',method:status==='paused'?'dictation':'recall',status,updatedAt,createdAt:'2026-10-21T08:00:00Z',wordIds:['one','two','three'],preferences:{label:status},stages:[{id:'stage-one'},{id:'stage-two'},{id:'stage-three'}],results,stageIndex:99});
+    const left=make('2026-10-21T09:00:00Z','active',{'stage-one':{one:{outcome:'wrong',at:'2026-10-21T08:30:00Z'}},'stage-two':{two:{outcome:'correct',at:'2026-10-21T08:50:00Z'}}});
+    Object.assign(left,{elapsedMs:60000,completedStages:{'stage-one':true},resolvedStages:{'stage-one':['two','one']},stageSessions:{'stage-two':{deck:['one','two'],draft:'old',updatedAt:'2026-10-21T08:00:00Z'}}});
+    const right=make('2026-10-21T10:00:00Z','paused',{'stage-one':{one:{outcome:'correct',at:'2026-10-21T09:30:00Z'},two:{outcome:'known',at:'2026-10-21T09:00:00Z'}}});
+    Object.assign(right,{elapsedMs:40000,completedStages:{'stage-two':true},resolvedStages:{'stage-one':['three','one']},stageSessions:{'stage-two':{deck:['three'],draft:'new',updatedAt:'2026-10-21T10:00:00Z'}}});
+    const l={planSessions:{'plan-one':left}},r={planSessions:{'plan-one':right}},before=JSON.stringify([l,r]);
+    const merged=clone(pure.mergeThreeWay(undefined,l,r)),row=merged.planSessions['plan-one'];
+    assert.deepEqual(clone(pure.mergeThreeWay(undefined,r,l)),merged);assert.equal(JSON.stringify([l,r]),before);
+    assert.equal(row.status,'paused');assert.equal(row.method,'dictation');assert.deepEqual(row.preferences,{label:'paused'});assert.equal(row.results['stage-one'].one.outcome,'wrong');assert.ok(row.results['stage-two'].two);
+    assert.equal(row.stageIndex,2);assert.equal(row.elapsedMs,60000);assert.deepEqual(row.stageSessions['stage-two'],right.stageSessions['stage-two']);assert.deepEqual([...row.resolvedStages['stage-one']].sort(),['one','three','two']);
+  });
+  await test('merged plan stage index stops at the first unfinished stage despite a later completed stage',()=>{
+    const l={planSessions:{p:{id:'p',stageIndex:99,stages:[{id:'first'},{id:'second'},{id:'third'}],completedStages:{third:true},updatedAt:'2026-10-21T10:00:00Z'}}};
+    assert.equal(pure.mergeThreeWay(undefined,l,{}).planSessions.p.stageIndex,0);
+    const r={planSessions:{p:{...l.planSessions.p,completedStages:{first:true}}}};
+    assert.equal(pure.mergeThreeWay(undefined,l,r).planSessions.p.stageIndex,1);
+  });
+  await test('resolved plan stages preserve frozen baseline order before concurrent additional words',()=>{
+    const make=ids=>({planSessions:{p:{id:'p',stages:[{id:'stage'}],resolvedStages:{stage:ids},updatedAt:'2026-10-21T10:00:00Z'}}});
+    const base=make(['z','a']),left=make(['z','a','c']),right=make(['z','a','b']);
+    const row=pure.mergeThreeWay(base,left,right).planSessions.p;assert.deepEqual(clone(row.resolvedStages.stage),['z','a','b','c']);assert.deepEqual(clone(pure.mergeThreeWay(base,right,left).planSessions),clone(pure.mergeThreeWay(base,left,right).planSessions));
+    assert.deepEqual(clone(pure.mergeThreeWay(undefined,make(['z','a']),{}).planSessions.p.resolvedStages.stage),['z','a']);
+  });
+  await test('same plan attempt timestamp conflicts select a canonical whole answer and reject unsafe IDs',()=>{
+    const make=outcome=>({planSessions:{p:{id:'p',stages:[{id:'stage'}],results:{stage:{word:{outcome,at:'2026-10-21T10:00:00Z',extra:'discard'},invalid:{outcome:'correct',at:'bad'}}}}}});
+    const left=make('wrong'),right=make('correct');left.planSessions.constructor={id:'constructor'};
+    const a=clone(pure.mergeThreeWay(undefined,left,right)),b=clone(pure.mergeThreeWay(undefined,right,left));assert.deepEqual(a,b);assert.equal(a.planSessions.p.results.stage.word.outcome,'correct');assert.deepEqual(Object.keys(a.planSessions.p.results.stage.word),['outcome','at']);assert.equal(a.planSessions.p.results.stage.invalid,undefined);assert.equal(Object.hasOwn(a.planSessions,'constructor'),false);
+  });
+  await test('a plan-only local snapshot is merged and uploaded instead of being treated as an empty new device',async()=>{
+    const plan={id:'plan-local',wordIds:['word'],stages:[{id:'stage'}],status:'paused',updatedAt:'2026-10-21T10:00:00Z'},local={...empty(),planSessions:{'plan-local':plan},activePlanId:'plan-local'};
+    const remote={...empty(),marks:{remote:known('2026-10-21T09:00:00Z')}};
+    const app=harness({state:local,network:async entry=>entry.method==='GET'?reply(remote,4):reply(entry.payload.state,5)});await app.start();
+    assert.equal(app.requests.length,2);assert.ok(app.requests[1].payload.state.planSessions['plan-local']);assert.equal(app.state.activePlanId,'plan-local');assert.ok(app.state.marks.remote);
+  });
+  await test('plan records and active plan positions have distinct sync health change groups',()=>{
+    const plan={id:'p',wordIds:['word']};const result=clone(pure.changeSummary({planSessions:{},activePlanId:null},{planSessions:{p:plan},activePlanId:'p'}));
+    assert.deepEqual(result.groups,{planSessions:1,positions:1});assert.equal(result.count,2);
+  });
+  await test('standalone cloud memory-method preferences exactly match the review engine normalizer',()=>{
+    const reviewWindow={};vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../public/review.js'),'utf8'),{window:reviewWindow,console,Date});
+    for(const input of [undefined,{}, {reviewLimit:20,newLimit:5}, {method:'quick',reviewLimit:160,newLimit:40,targetMinutes:60,chunkSize:25,scope:{kind:'chapters',chapterIds:[3,1,3],notebookChapterIds:['today','constructor']}}, {method:'bad',targetMinutes:0,chunkSize:999,reviewLimit:999,newLimit:-1,intervals:[1,2,5,12,30],scope:{kind:'bad'},updatedAt:'bad'}]){
+      const expected=clone(reviewWindow.OrdrumReview.cleanPreferences(input));const merged=clone(pure.mergeThreeWay(undefined,{reviewPreferences:input || {}},{}).reviewPreferences);assert.deepEqual(merged,expected);
+    }
+  });
+  await test('legacy untouched daily defaults also allow complete remote adoption without a blank overwrite',async()=>{
+    const defaults={reviewLimit:20,newLimit:5,intervals:[1,3,7,14,30],paused:false,updatedAt:'1970-01-01T00:00:00.000Z'},remote={...empty(),mode:'dictation'};
+    const app=harness({state:{...empty(),reviewPreferences:defaults},network:async()=>reply(remote,5)});await app.start();assert.equal(app.requests.length,1);assert.equal(app.state.mode,'dictation');
   });
   console.log(`\n${passed} cloud checks passed.`);
 })().catch(error=>{console.error(error);process.exitCode=1;});

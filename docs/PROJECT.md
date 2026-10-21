@@ -10,7 +10,10 @@ ordrum/
 │   ├── app.js               预览、翻卡片、听写与词条编辑
 │   ├── study.js/.css        学习任务与错题本
 │   ├── session.js           学习位置、轮次标识、今日计划与恢复
-│   ├── review.js/.css       复习事件、间隔安排和今日计划
+│   ├── review.js/.css       复习事件、间隔安排和记忆法预设
+│   ├── plan.js/.css         独立计划学习页与稳定练习区
+│   ├── plan-core.js         计划会话清洗与进度计算（合并由 cloud.js 负责）
+│   ├── plan-session.js      计划练习接入、分组、暂停与恢复
 │   ├── sync-health.js/.css  同步提示、恢复预览与本机恢复点
 │   ├── word-extras.js/.css  按需查询临时例句、相关词和读音
 │   ├── cloud.js             账号隔离与自动同步
@@ -52,7 +55,8 @@ ordrum/
 | 修改页面文字和排列 | `public/index.html`、`public/style.css`、`public/workspace.css` |
 | 修改听写判分、翻卡和词形显示 | `public/app.js` |
 | 修改任务管理、错题本书籍与章节 | `public/study.js`、`public/study.css` |
-| 修改今日计划、间隔和复习事件 | `public/review.js`、`public/review.css`、`public/session.js` |
+| 修改计划页、记忆法与间隔 | `public/plan.js`、`public/plan.css`、`public/review.js` |
+| 修改计划分组、计时、继续与合并 | `public/plan-session.js`、`public/plan-core.js`、`public/session.js` |
 | 修改临时联网扩展和来源限制 | `public/word-extras.js`、`public/word-extras.css` |
 | 修改保存位置和恢复草稿 | `public/session.js` |
 | 修改跨设备同步 | `public/cloud.js`、`public/github-sync.js` |
@@ -70,6 +74,8 @@ ordrum/
 | --- | --- |
 | `tests/frontend.test.cjs` | 学习交互、会话恢复、错题本入口和同步后刷新 |
 | `tests/study.test.cjs` | 任务、错题本书籍、章节和固定单元管理 |
+| `tests/plan.test.cjs` | 独立计划页、方法与范围草稿、焦点、练习节点保护和结束确认 |
+| `tests/plan-core.test.cjs`、`tests/plan-session.test.cjs` | 计划会话清洗、真实阶段首答、分组、暂停计时、重开恢复与原进度保护 |
 | `tests/review.test.cjs` | 间隔规则、每日上限、首次与重试、合并去重、日历边界、容量保护和今日计划 |
 | `tests/cloud.test.cjs` | 自动同步、记录合并、账号隔离和中断恢复 |
 | `tests/github-sync.test.cjs` | 私有仓库传输、身份和版本检查、文件冲突 |
@@ -86,7 +92,7 @@ ordrum/
 
 词库的卡片 ID、瑞典语原文、章节和页码对应原始词卡。释义、词形及发音来源保存在 `public/DICTIONARY-SOURCES.md`、`dictionary-provenance.json` 和 `audio-provenance.json` 中，应和词库、音频一同保留。
 
-当前学习记录、错词单元、复习事件和计划偏好保存在浏览器及独立 GitHub 私有进度仓库中。外观只在设备保存；联网词义扩展只保留当前页面内存，不写入学习记录、档案或同步。恢复点另保存在当前浏览器，按账号与书籍隔离；手动导出才会得到可自行保存的档案文件。旧数据库不参与新同步。项目里的 `.wrangler/` 是独立的本地数据库和运行状态；`.sites-runtime/`、`.vinext/`、`.next/` 是本机开发工具状态。整理源码时不应将这些目录当作学习数据备份，也不要直接清除本地数据库。
+当前学习记录、错词单元、复习事件、计划会话和计划偏好保存在浏览器及独立 GitHub 私有进度仓库中。外观只在设备保存；联网词义扩展只保留当前页面内存，不写入学习记录、档案或同步。恢复点另保存在当前浏览器，按账号与书籍隔离；手动导出才会得到可自行保存的档案文件。旧数据库不参与新同步。项目里的 `.wrangler/` 是独立的本地数据库和运行状态；`.sites-runtime/`、`.vinext/`、`.next/` 是本机开发工具状态。整理源码时不应将这些目录当作学习数据备份，也不要直接清除本地数据库。
 
 `node_modules/` 是依赖，`dist/` 是生成的部署产物；`outputs/`、`work/` 和 `.tmp/` 存放已有输出或工作文件。这些目录均不属于日常编辑网页的入口。
 

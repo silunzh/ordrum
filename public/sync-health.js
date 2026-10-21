@@ -2,9 +2,9 @@
   'use strict';
   const KEY = 'ordrum.recovery.v1';
   const MAX_SNAPSHOT = 1800000, MAX_STORE = 3000000, MAX_SCOPES = 6;
-  const STATE_KEYS = ['selectedChapters','selectedBook','selectedNotebookChapters','mode','layout','marks','overrides','rate','autoPlay','voiceURI','tasks','notebook','notebookUnits','activeTaskId','studySession','reviewSession','reviewEvents','reviewPreferences'];
-  const MAP_KEYS = ['notebook','marks','reviewEvents','notebookUnits','overrides'];
-  const LABELS = {tasks:'任务',notebook:'错词记录',marks:'掌握标记',reviewEvents:'复习事件',notebookUnits:'错词单元',overrides:'词条修改',preferences:'偏好',positions:'学习位置'};
+  const STATE_KEYS = ['selectedChapters','selectedBook','selectedNotebookChapters','mode','layout','marks','overrides','rate','autoPlay','voiceURI','tasks','notebook','notebookUnits','activeTaskId','studySession','reviewSession','reviewEvents','reviewPreferences','planSessions','activePlanId'];
+  const MAP_KEYS = ['notebook','marks','reviewEvents','notebookUnits','overrides','planSessions'];
+  const LABELS = {tasks:'任务',notebook:'错词记录',marks:'掌握标记',reviewEvents:'复习事件',notebookUnits:'错词单元',overrides:'词条修改',planSessions:'学习计划',preferences:'偏好',positions:'学习位置'};
   const unsafe = /^(?:__proto__|prototype|constructor|__cloudCommitId)$|token|password|authorization|secret|credential|connection|access.?key/i;
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));

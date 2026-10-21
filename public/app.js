@@ -32,10 +32,10 @@ const StudyCore = window.OrdrumStudy;
 let data = null, audioMap = {}, voices = [], activeAudio = null, toastTimer;
 let currentDeck = [], flashIndex = 0, flipped = false, dictationIndex = 0, dictationResult = null;
 let dictationAnswers = {}, mistakes = new Set(), retryMode = false, search = '', page = 1, renderToken = 0;
-let state = {selectedChapters:null, selectedBook:null, selectedNotebookChapters:['all'], mode:'preview', layout:'grid', marks:{}, overrides:{}, rate:0.85, autoPlay:false, voiceURI:'', tasks:[], notebook:null, notebookUnits:{}, reviewEvents:{}, reviewPreferences:{}, activeTaskId:null, studySession:null, reviewSession:null};
+let state = {selectedChapters:null, selectedBook:null, selectedNotebookChapters:['all'], mode:'preview', layout:'grid', marks:{}, overrides:{}, rate:0.85, autoPlay:false, voiceURI:'', tasks:[], notebook:null, notebookUnits:{}, reviewEvents:{}, reviewPreferences:{}, planSessions:{}, activePlanId:null, activeTaskId:null, studySession:null, reviewSession:null};
 let storageAvailable = true;
 let cloudCommitId = null;
-let reviewSessionId = newReviewSessionId(), planKind = '', todayView = null, pendingRestore = null, renderedDay = '';
+let reviewSessionId = newReviewSessionId(), planKind = '', pendingRestore = null, renderedDay = '';
 function newReviewSessionId() { return `round-${window.crypto?.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}`; }
 
 function hydrateIcons(root = document) {
@@ -70,6 +70,8 @@ function restore() {
       if (Array.isArray(saved.selectedNotebookChapters)) state.selectedNotebookChapters = saved.selectedNotebookChapters;
       if (saved.reviewEvents && typeof saved.reviewEvents === 'object') state.reviewEvents = saved.reviewEvents;
       if (saved.reviewPreferences && typeof saved.reviewPreferences === 'object') state.reviewPreferences = saved.reviewPreferences;
+      if (saved.planSessions && typeof saved.planSessions === 'object') state.planSessions = saved.planSessions;
+      if (typeof saved.activePlanId === 'string') state.activePlanId = saved.activePlanId;
       if (['preview','flashcard','dictation'].includes(saved.mode)) state.mode = saved.mode;
       if (['grid','list'].includes(saved.layout)) state.layout = saved.layout;
       if (saved.marks && typeof saved.marks === 'object' && !Array.isArray(saved.marks)) state.marks = saved.marks;
@@ -97,7 +99,7 @@ function selectedWords() {
   return data.words.filter(word => taskIds ? taskIds.has(word.id) : chosen.has(Number(word.chapter))).map(wordFor);
 }
 function markStatus(id) {
-  const task = activeStudyTask();
+  const task = isPlanPractice() ? null : activeStudyTask();
   const mark = task ? task.marks[id] : state.marks[id];
   return typeof mark === 'string' ? mark : mark?.status;
 }
@@ -227,7 +229,7 @@ function renderSummary() {
   }
   window.OrdrumStudyUI.renderContext();
   if ($('#today-plan')) $('#today-plan').hidden = retryMode;
-  todayView?.render();
+  planPageView?.render();
 }
 function refreshCalendarViews() {
   if (!data || document.visibilityState === 'hidden') return;
@@ -309,7 +311,7 @@ function renderPreviewResults() {
   $('#preview-results').innerHTML = `<div class="word-grid ${state.layout === 'list' ? 'list-view' : ''}">${words.slice(start,start+PAGE_SIZE).map(word => `<article class="word-card ${markStatus(word.id) === 'known' ? 'is-known' : ''}"><div class="word-card-top"><span class="word-tag">KAPITEL ${word.chapter}</span><span class="word-tag pos">${esc(posLabel(word.pos))}</span></div><div class="word-title-row"><h3 class="swedish-word" lang="sv">${esc(word.swedish)}</h3><button class="sound-button" data-action="speak" data-id="${esc(word.id)}" title="听读 ${esc(word.swedish)}" aria-label="听读 ${esc(word.swedish)}">${icon('sound')}</button></div>${definitionMarkup(word)}${formsMarkup(word)}<div class="word-card-footer"><button class="known-toggle ${markStatus(word.id) === 'known' ? 'marked' : ''}" data-action="toggle-known" data-id="${esc(word.id)}" aria-pressed="${markStatus(word.id) === 'known'}">${icon('check')}${markStatus(word.id) === 'known' ? '已掌握' : '标为掌握'}</button><button class="edit-button" data-action="edit" data-id="${esc(word.id)}">编辑</button></div></article>`).join('')}</div><div class="preview-footer"><span>点按词形听读</span><div class="pagination"><button class="small-square" data-action="page-prev" ${page === 1 ? 'disabled' : ''} aria-label="上一页">${icon('left')}</button><span>${page} / ${pages}</span><button class="small-square" data-action="page-next" ${page === pages ? 'disabled' : ''} aria-label="下一页">${icon('right')}</button></div></div>`;
 }
 function studyTopline(index, type) {
-  return `<div class="study-topline"><div class="study-counter"><strong>${Math.min(index+1,currentDeck.length)}</strong> / ${currentDeck.length} <span>${planKind === 'today' ? ' · 今日计划' : retryMode && type === 'dictation' ? ' · 错词重练' : ''}</span></div><div class="study-controls">${planKind === 'today' ? '<button class="control-button" data-action="skip-today">今天跳过</button><button class="control-button" data-action="return-to-study">返回原进度</button>' : ''}${type === 'flashcard' ? `<label class="auto-play"><input type="checkbox" id="auto-play" ${state.autoPlay ? 'checked' : ''}>自动读音</label>` : `<button class="control-button" data-action="retry-mistakes" ${!mistakes.size ? 'disabled' : ''}>${icon('reset')}重练错词 (${mistakes.size})</button>`}<button class="control-button" data-action="shuffle">${icon('shuffle')}打乱顺序</button></div></div><div class="study-progress" role="progressbar" aria-label="本轮卡片位置" aria-valuemin="0" aria-valuemax="${currentDeck.length}" aria-valuenow="${index+1}"><span style="width:${((index+1)/currentDeck.length)*100}%"></span></div>`;
+  return `<div class="study-topline"><div class="study-counter"><strong>${Math.min(index+1,currentDeck.length)}</strong> / ${currentDeck.length} <span>${planKind === 'today' ? ' · 今日计划' : retryMode && type === 'dictation' ? ' · 错词重练' : ''}</span></div><div class="study-controls">${planKind === 'plan' ? '<button class="control-button" data-action="skip-today">跳过此词</button>' : planKind === 'today' ? '<button class="control-button" data-action="skip-today">今天跳过</button><button class="control-button" data-action="return-to-study">返回原进度</button>' : ''}${type === 'flashcard' ? `<label class="auto-play"><input type="checkbox" id="auto-play" ${state.autoPlay ? 'checked' : ''}>自动读音</label>` : isPlanPractice() ? '' : `<button class="control-button" data-action="retry-mistakes" ${!mistakes.size ? 'disabled' : ''}>${icon('reset')}重练错词 (${mistakes.size})</button>`}<button class="control-button" data-action="shuffle">${icon('shuffle')}打乱顺序</button></div></div><div class="study-progress" role="progressbar" aria-label="本轮卡片位置" aria-valuemin="0" aria-valuemax="${currentDeck.length}" aria-valuenow="${index+1}"><span style="width:${((index+1)/currentDeck.length)*100}%"></span></div>`;
 }
 function renderFlashcard() {
   const word = currentWord(flashIndex);
@@ -317,7 +319,7 @@ function renderFlashcard() {
   const previousExtras = window.OrdrumWordExtras ? $('#word-extras') : null;
   const preserveExtras = flipped && previousExtras?.dataset.wordId === word.id;
   if (!preserveExtras) window.OrdrumWordExtras?.unmount();
-  $('#mode-content').innerHTML = `${studyTopline(flashIndex,'flashcard')}${audioNotice(word)}<div class="flash-layout"><div class="flash-main"><article class="flash-card ${flipped ? 'back' : ''}" data-flashcard="true" aria-label="单词卡"><div class="flash-source"><span class="flash-label">KAPITEL ${word.chapter} · ${esc(posLabel(word.pos))}</span><h3 class="flash-word" lang="sv">${esc(word.swedish)}</h3></div><div class="flash-definition" id="flash-definition" ${flipped ? '' : 'hidden'}>${flipped ? `<span class="flash-label">ENGLISH · 英文释义</span><p class="flash-english" lang="en">${esc(word.english || '释义待补充')}</p>${formsMarkup(word,false)}<div id="word-extras" class="word-extras"></div>` : ''}</div><button type="button" class="flip-toggle" data-action="flip" aria-expanded="${flipped}" aria-controls="flash-definition">${icon('flip')}${flipped ? '收起释义' : '翻开释义'}</button></article><div class="flash-audio-row"><button class="sound-button" data-action="speak" data-id="${esc(word.id)}" aria-label="听读此词">${icon('sound')}</button><button class="edit-button" data-action="edit" data-id="${esc(word.id)}">编辑词条</button></div><div class="flash-actions"><button class="small-square" data-action="flash-prev" ${flashIndex === 0 ? 'disabled' : ''} aria-label="上一张">${icon('left')}</button><button class="secondary-button" data-action="flash-review">${icon('reset')}再记一次</button><button class="primary-button" data-action="flash-known">${icon('check')}已经记住</button><button class="small-square" data-action="flash-next" aria-label="下一张">${icon('right')}</button></div><p class="shortcut-note"><kbd>空格</kbd> 翻开 / 收起 <span> · </span><kbd>←</kbd><kbd>→</kbd> 切换卡片 <span> · </span>文字可选中复制</p></div></div>`;
+  $('#mode-content').innerHTML = `${studyTopline(flashIndex,'flashcard')}${audioNotice(word)}<div class="flash-layout"><div class="flash-main"><article class="flash-card ${flipped ? 'back' : ''}" data-flashcard="true" aria-label="单词卡"><div class="flash-card-tools"><span class="flash-label">${esc(posLabel(word.pos))} · ${word.chapter}</span><div><button class="sound-button" data-action="speak" data-id="${esc(word.id)}" aria-label="听读此词">${icon('sound')}</button><button class="edit-button" data-action="edit" data-id="${esc(word.id)}" aria-label="编辑词条">${icon('edit')}</button></div></div><div class="flash-source"><h3 class="flash-word" lang="sv">${esc(word.swedish)}</h3></div><div class="flash-definition" id="flash-definition" ${flipped ? '' : 'hidden'}>${flipped ? `<p class="flash-english" lang="en">${esc(word.english || '释义待补充')}</p>${flashFormsMarkup(word)}<div id="word-extras" class="word-extras"></div>` : ''}</div><button type="button" class="flip-toggle" data-action="flip" aria-expanded="${flipped}" aria-controls="flash-definition">${icon('flip')}${flipped ? '收起释义' : '翻开释义'}</button></article><div class="flash-actions"><button class="small-square" data-action="flash-prev" ${flashIndex === 0 ? 'disabled' : ''} aria-label="上一张">${icon('left')}</button><button class="secondary-button" data-action="flash-review">再记一次</button><button class="primary-button" data-action="flash-known">已经记住</button><button class="small-square" data-action="flash-next" aria-label="下一张">${icon('right')}</button></div><p class="shortcut-note"><kbd>空格</kbd> 翻面 · <kbd>←</kbd><kbd>→</kbd> 换词 · 文字可选中复制</p></div></div>`;
   if (flipped && window.OrdrumWordExtras) {
     const placeholder = $('#word-extras');
     if (preserveExtras && placeholder !== previousExtras) placeholder.replaceWith(previousExtras);
@@ -331,6 +333,11 @@ function renderFlashcard() {
     save();
     if (state.autoPlay && !flipped) speak(word.swedish);
   });
+}
+function flashFormsMarkup(word) {
+  const forms = visibleForms(word);
+  const brief = label => ({'命令式':'命令','不定式':'不定','现在时':'现在','过去时':'过去','完成式用形 (supinum)':'完成','完成式':'完成'}[label] || label);
+  return forms.length ? `<dl class="word-forms flash-forms">${forms.map(form => `<div class="form-row"><dt title="${esc(form.label)}">${esc(brief(form.label))}</dt><dd><button class="form-value-button" data-action="speak-text" data-text="${esc(form.value)}" aria-label="听读 ${esc(form.value)}">${esc(form.value)}</button></dd></div>`).join('')}</dl>` : '';
 }
 function toggleFlashcard() {
   const word = currentWord(flashIndex);
@@ -398,6 +405,7 @@ function flashMove(delta, wrap = false) {
   const next = flashIndex + delta;
   if (next < 0) return;
   if (next >= currentDeck.length) {
+    if (isPlanPractice()) { finishPlanStage(); return; }
     if (planKind === 'today') {
       stopAudio(); save();
       openDialog('今日计划已完成',`<p>已走完本轮 ${currentDeck.length} 张卡片。翻卡自评与听写首次结果分别记录；之后会按复习间隔安排。</p><div class="dialog-actions"><button class="primary-button" data-action="return-to-study">返回原学习进度</button></div>`);
@@ -409,7 +417,7 @@ function flashMove(delta, wrap = false) {
   flipped = false; stopAudio(); renderMode();
 }
 function dictNext() {
-  if (dictationIndex >= currentDeck.length-1) { stopAudio(); showRoundComplete(); return; }
+  if (dictationIndex >= currentDeck.length-1) { stopAudio(); if (isPlanPractice()) finishPlanStage(); else showRoundComplete(); return; }
   dictationIndex++; dictationResult = null; dictationDraft = ''; stopAudio(); renderMode();
 }
 function retryDictation() {
@@ -448,7 +456,7 @@ function closeDialog() {
 }
 function showHelp(mount = null) {
   if (!mount && window.OrdrumSettings) return window.OrdrumSettings.open('archive');
-  openDialog('使用说明',`<h3>先选章节，再挑一个练习方式</h3><p>「预览」查看词义和词形；「翻卡片」先回想，再翻面；「听写」反复听读并写下瑞典语。单词卡沿用原书的章节，同一词语可能在不同章节出现。</p><h3>词义与词形</h3><p>单词卡从你提供的 Rivstart A1/A2 Ordkort 提取。英文释义与语法形式由公开词典自动匹配，可能有多义词或短语未完全匹配。缺失内容会明确标出，可点「编辑」补充或订正。请结合教材语境理解。</p><p>名词展示可查到的单数不定、单数定、复数不定、复数定形式；动词展示可查到的命令式、不定式、现在、过去、完成式。没有可靠匹配的形式留空。</p><h3>听读与听写</h3><p>${Object.keys(audioMap).length ? '已内置瑞典语合成发音；词形和你自行补充的内容使用浏览器提供的瑞典语语音。' : '听读使用浏览器中可用的瑞典语语音。'}可在「设置 → 发音」调整语速。听写每到一个新词会自动播放，输入后按回车检查；答对后再次回车进入下一词，答错后再次回车重新听写本词并播放音频。听写保留 å、ä、ö 的区别，忽略大小写、多余空格和句末标点。</p><h3>今日计划与词卡参考</h3><p>今日计划在所选范围内优先安排到期词。默认每天安排 20 个复习词和 5 个新词卡，可调整、暂停或跳过；成功后按 1、3、7、14、30 天安排，未记住的词约 10 分钟后再出现。记录从此功能启用后积累，翻卡自评与听写首次作答分别记录。翻开词卡可按需查询 Wiktionary 的例句、近反义词和读音；再次关闭会收起，不修改释义。每项标明义项和来源，联网或已有本次会话缓存时可用。</p><h3>你的学习记录</h3><p>可以用已选章节或整本书创建学习任务。每个任务分别记录掌握进度、错词和学习位置；刷新或重新打开网页可继续。在书架中选择「错题本」这本书，可勾选今天、本周或固定单元作为章节；管理按钮可整理、重命名或删除分组，删除分组不删除错词。错题本还可按任务、原书章节、状态筛选，批量重练、标为掌握或删除。任务可重命名、归档、重置和删除。章节选择、任务、错题与修改会保存在此设备；在「设置 → 同步设置」连接同一个 GitHub 私有进度仓库后，会在电脑、手机及主屏幕 App 之间自动同步。同步状态和操作统一放在「设置 → 同步设置」。离线时先保存在本机，联网后合并上传。设置中的档案标签可以导出或导入全部记录。清理浏览器数据会清除本地记录，请按需备份。</p><h3>资料来源与许可</h3><p>教材：Rivstart A1/A2 Ordkort，来自你提供的 PDF。教材内容用于你的个人学习。词典来源：</p><a class="source-link" href="https://folkets-lexikon.csc.kth.se/folkets/om.en.html" target="_blank" rel="noopener noreferrer">Folkets lexikon · 英文释义 · CC BY-SA 2.5</a><a class="source-link" href="https://sprakbanken.se/en/resources/saldom" target="_blank" rel="noopener noreferrer">Språkbanken Text · SALDO 瑞典语词形 · CC BY 4.0</a><div class="dialog-actions"><button class="primary-button" data-action="close-dialog">开始学习</button></div>`,mount);
+  openDialog('使用说明',`<h3>先选章节，再挑一个练习方式</h3><p>「预览」查看词义和词形；「翻卡片」先回想，再翻面；「听写」反复听读并写下瑞典语。单词卡沿用原书的章节，同一词语可能在不同章节出现。</p><h3>词义与词形</h3><p>单词卡从你提供的 Rivstart A1/A2 Ordkort 提取。英文释义与语法形式由公开词典自动匹配，可能有多义词或短语未完全匹配。缺失内容会明确标出，可点「编辑」补充或订正。请结合教材语境理解。</p><p>名词展示可查到的单数不定、单数定、复数不定、复数定形式；动词展示可查到的命令式、不定式、现在、过去、完成式。没有可靠匹配的形式留空。</p><h3>听读与听写</h3><p>${Object.keys(audioMap).length ? '已内置瑞典语合成发音；词形和你自行补充的内容使用浏览器提供的瑞典语语音。' : '听读使用浏览器中可用的瑞典语语音。'}可在「设置 → 发音」调整语速。听写每到一个新词会自动播放，输入后按回车检查；答对后再次回车进入下一词，答错后再次回车重新听写本词并播放音频。听写保留 å、ä、ö 的区别，忽略大小写、多余空格和句末标点。</p><h3>今日计划与词卡参考</h3><p>右上角「计划学习」按到期词优先安排，提供分组主动回忆（30新＋90复习）、听写巩固（20新＋80复习）、快速交错复习（40新＋160复习）。这是约一小时的可调整上限，使用实际可用词数；新词和复习词合计，不代表一小时能掌握同等数量的新词。每组10–25词，保存分组、首次答案、位置与前台学习时间，可暂停续学。成功后默认按1、3、7、14、30天安排，未记住的词约10分钟后再出现；间隔可调整。翻卡自评与听写首答分别统计。词卡可按需联网查询同义词、反义词、瑞典语音标和例句，当前词形缺失时补查原型；再次关闭即收起，不修改释义。参考资料可在档案中展开。</p><h3>你的学习记录</h3><p>可以用已选章节或整本书创建学习任务。每个任务分别记录掌握进度、错词和学习位置；刷新或重新打开网页可继续。在书架中选择「错题本」这本书，可勾选今天、本周或固定单元作为章节；管理按钮可整理、重命名或删除分组，删除分组不删除错词。错题本还可按任务、原书章节、状态筛选，批量重练、标为掌握或删除。任务可重命名、归档、重置和删除。章节选择、任务、错题与修改会保存在此设备；在「设置 → 同步设置」连接同一个 GitHub 私有进度仓库后，会在电脑、手机及主屏幕 App 之间自动同步。同步状态和操作统一放在「设置 → 同步设置」。离线时先保存在本机，联网后合并上传。设置中的档案标签可以导出或导入全部记录。清理浏览器数据会清除本地记录，请按需备份。</p><h3>资料来源与许可</h3><p>教材：Rivstart A1/A2 Ordkort，来自你提供的 PDF。教材内容用于你的个人学习。词典来源：</p><a class="source-link" href="https://folkets-lexikon.csc.kth.se/folkets/om.en.html" target="_blank" rel="noopener noreferrer">Folkets lexikon · 英文释义 · CC BY-SA 2.5</a><a class="source-link" href="https://sprakbanken.se/en/resources/saldom" target="_blank" rel="noopener noreferrer">Språkbanken Text · SALDO 瑞典语词形 · CC BY 4.0</a><div class="dialog-actions"><button class="primary-button" data-action="close-dialog">开始学习</button></div>`,mount);
 }
 function showAudioSettings(mount = null) {
   if (!mount && window.OrdrumSettings) return window.OrdrumSettings.open('audio');
@@ -476,7 +484,12 @@ function showEdit(id) {
 function showProgress(mount = null) {
   if (!mount && window.OrdrumSettings) return window.OrdrumSettings.open('archive');
   const known = data.words.filter(word => (typeof state.marks[word.id] === 'string' ? state.marks[word.id] : state.marks[word.id]?.status) === 'known').length;
-  openDialog('学习档案',`<p>全书共有 <b>${known}</b> 张卡片标为已掌握，<b>${state.tasks.length}</b> 个学习任务，错题本有 <b>${Object.keys(state.notebook).length}</b> 个词条，<b>${Object.keys(state.overrides).length}</b> 个词条有你的修改。记录同时保存在此设备；连接同一个 GitHub 私有进度仓库后，可与其他设备自动同步。</p><div class="progress-actions"><button class="secondary-button" data-action="export-progress">${icon('download')}导出学习记录</button><button class="secondary-button" data-action="import-progress">${icon('upload')}从备份恢复记录</button></div><p style="font-size:10px;margin-top:18px">备份包含任务、错词章节、复习历史与计划、学习位置、掌握标记和词条修改。恢复前先预览变化，并自动备份当前记录；已有学习位置优先保留。</p>`,mount);
+  const requestedCredits = window.OrdrumWordExtras?.getCredits?.();
+  const references = (Array.isArray(requestedCredits) ? requestedCredits : []).slice(0,80).filter(record => {
+    try { const url = new URL(record.url); return url.protocol === 'https:' && url.hostname === 'en.wiktionary.org' && !url.port && !url.username && !url.password && url.pathname.startsWith('/wiki/') && url.hash === '#Swedish'; } catch (_) { return false; }
+  });
+  const credits = `<details class="archive-references"><summary>参考资料${references.length ? ` · ${references.length}` : ''}</summary><p>词卡扩展取自 Wiktionary 瑞典语条目，摘录经过筛选与简化排版。文本采用 <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> 许可；下列链接保留所查询的具体修订。</p>${references.length ? `<ul>${references.map(record => `<li><a href="${esc(record.url)}" target="_blank" rel="noopener noreferrer"><span lang="sv">${esc(record.title)}</span></a> · ${esc(record.source)}${Number.isSafeInteger(record.revision) && record.revision > 0 ? ` · 修订 ${record.revision}` : ''}</li>`).join('')}</ul>` : '<p>按需查询后，本次会话的参考条目会显示在这里。</p>'}</details>`;
+  openDialog('学习档案',`<p>全书共有 <b>${known}</b> 张卡片标为已掌握，<b>${state.tasks.length}</b> 个学习任务，错题本有 <b>${Object.keys(state.notebook).length}</b> 个词条，<b>${Object.keys(state.overrides).length}</b> 个词条有你的修改。记录同时保存在此设备；连接同一个 GitHub 私有进度仓库后，可与其他设备自动同步。</p><div class="progress-actions"><button class="secondary-button" data-action="export-progress">${icon('download')}导出学习记录</button><button class="secondary-button" data-action="import-progress">${icon('upload')}从备份恢复记录</button></div><p style="font-size:10px;margin-top:18px">备份包含任务、错词章节、复习历史与计划、学习位置、掌握标记和词条修改。恢复前先预览变化，并自动备份当前记录；已有学习位置优先保留。</p>${credits}`,mount);
 }
 function downloadBackup(backup,prefix = 'ordrum-progress') {
   const blob = new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
@@ -512,6 +525,7 @@ function mergedBackupState(incoming,replace = false) {
     if (typeof incoming.autoPlay === 'boolean') next.autoPlay = incoming.autoPlay;
     if (typeof incoming.voiceURI === 'string') next.voiceURI = incoming.voiceURI;
     StudyCore.merge(next,incoming,data);
+    next.planSessions = window.OrdrumCloud.mergeThreeWay({}, {planSessions:next.planSessions || {}}, {planSessions:incoming.planSessions || {}}).planSessions || {};
   }
   // Review events are immutable history, including events collected since a recovery point.
   next.reviewEvents = window.OrdrumReview?.mergeEvents(state.reviewEvents,incoming.reviewEvents,data) || next.reviewEvents || {};
@@ -521,6 +535,7 @@ function mergedBackupState(incoming,replace = false) {
 function previewRestore(backup,{replace = false} = {}) {
   if (backup?.app !== 'ordrum' || backup.version !== 1 || !backup.state || typeof backup.state !== 'object' || Array.isArray(backup.state) || (backup.book && backup.book !== data.book.id)) throw new Error('format');
   if (window.OrdrumCloud?.getHealth?.().recoveryPending) { notify('同步恢复尚未完成。请先在同步设置中重试，或导出当前记录。'); return; }
+  if (isPlanPractice()) pausePlannedSession();
   captureStudySession();
   const candidate = mergedBackupState(backup.state,replace);
   const comparison = window.OrdrumSyncHealth?.preview(state,candidate);
@@ -540,6 +555,7 @@ function commitRestore() {
   if (!recovery?.ok) { notify('无法保存恢复前备份，尚未更改记录。请先导出档案并检查浏览器存储空间。'); return; }
   try { localStorage.setItem(STORAGE_KEY,JSON.stringify({...pending.candidate,__cloudCommitId:cloudCommitId})); }
   catch (_) { notify('无法保存恢复后的记录，尚未更改当前进度。恢复前备份仍可导出。'); return; }
+  planClockStarted = 0; moveStudySurface(false);
   state = pending.candidate; pendingRestore = null;
   restoreSavedStudy(); save(); renderChapters(); renderSummary(); renderMode({autoplay:false});
   closeDialog(); window.OrdrumSyncHealth?.refresh(); notify('记录已恢复，恢复前的备份保存在同步设置中。');
@@ -629,6 +645,7 @@ document.addEventListener('click',event => {
 });
 document.addEventListener('keydown',event => {
   if (!data || $('#app-dialog').open || $('dialog[open]') || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (appPage === 'plan' && !isPlanPractice()) return;
   const tag = document.activeElement?.tagName;
   const inputFocused = ['INPUT','TEXTAREA','SELECT'].includes(tag);
   if (state.mode === 'flashcard' && !inputFocused && currentDeck.length) {
@@ -648,7 +665,7 @@ document.addEventListener('keydown',event => {
 });
 $$('.mode-tab').forEach(tab => {
   tab.addEventListener('click',() => {
-    if (!data) return;
+    if (!data || isPlanPractice()) return;
     stopAudio(); state.mode = tab.dataset.mode; save(); renderMode();
   });
   tab.addEventListener('keydown',event => {
@@ -680,7 +697,7 @@ $('#book-select').addEventListener('change',event => {
 $('#help-button')?.addEventListener('click',() => { if (data) showHelp(); });
 $('#audio-settings-button')?.addEventListener('click',() => { if (data) showAudioSettings(); });
 $('#progress-button')?.addEventListener('click',() => { if (data) showProgress(); });
-$('#tasks-button').addEventListener('click',() => { if (data) window.OrdrumStudyUI.showTasks(); });
+$('#tasks-button').addEventListener('click',() => { if (data) { if (appPage === 'plan') showAppPage('study'); window.OrdrumStudyUI.showTasks(); } });
 $('#create-task-button').addEventListener('click',() => { if (data) window.OrdrumStudyUI.showCreateTask(); });
 $('#notebook-button').addEventListener('click',() => { if (data) window.OrdrumStudyUI.showNotebook(); });
 $('#import-file').addEventListener('change',event => importProgress(event.target.files[0]));
@@ -710,7 +727,7 @@ async function init() {
     $('#book-select').innerHTML = `<option value="${esc(data.book.id)}">${esc(data.book.title.replace(/\s*Ordkort\s*/i,''))}</option><option value="__notebook__">错题本</option>`;
     $('#source-footer').textContent = `${data.book.title} · ${data.chapters.length} 章 · ${data.words.length} 张卡片`;
     restoreSavedStudy();
-    todayView = window.OrdrumReview?.mount($('#today-plan'),{getState:()=>state,getData:()=>data,getWordIds:()=>selectedWords().map(word=>word.id),onChange:()=>{save();renderSummary();},onStart:startTodayPlan});
+    mountPlanPage();
     renderChapters(); renderSummary(); renderMode();
     renderedDay = window.OrdrumReview?.localDay(new Date()) || new Date().toDateString();
     window.OrdrumSettings?.refresh('audio');
@@ -741,7 +758,7 @@ async function init() {
   }
 }
 function emptyStudyState() {
-  return {selectedChapters:data.chapters.slice(0,2).map(chapter => Number(chapter.id)),selectedBook:data.book.id,selectedNotebookChapters:['all'],mode:'preview',layout:'grid',marks:{},overrides:{},rate:0.85,autoPlay:false,voiceURI:'',tasks:[],notebook:{},notebookUnits:{},reviewEvents:{},reviewPreferences:{},activeTaskId:null,studySession:null,reviewSession:null};
+  return {selectedChapters:data.chapters.slice(0,2).map(chapter => Number(chapter.id)),selectedBook:data.book.id,selectedNotebookChapters:['all'],mode:'preview',layout:'grid',marks:{},overrides:{},rate:0.85,autoPlay:false,voiceURI:'',tasks:[],notebook:{},notebookUnits:{},reviewEvents:{},reviewPreferences:{},planSessions:{},activePlanId:null,activeTaskId:null,studySession:null,reviewSession:null};
 }
 function normaliseCloudState(incoming) {
   const next = {...emptyStudyState(),...(incoming || {})};
@@ -756,16 +773,23 @@ function normaliseCloudState(incoming) {
   if (typeof next.voiceURI !== 'string') next.voiceURI = '';
   StudyCore.normalise(next,data);
   window.OrdrumReview?.normalise(next,data);
+  window.OrdrumPlanCore?.normalise(next,data);
   return next;
 }
 function applyCloudState(incoming,{commitId} = {}) {
+  const planned = isPlanPractice();
+  const previousStage = planned ? currentPlanStage()?.id : null;
   const studyDialog = window.OrdrumStudyUI?.captureDialogState();
   const input = $('#dictation-answer');
   const caret = input && document.activeElement === input ? [input.selectionStart,input.selectionEnd] : null;
   stopAudio();
   if (commitId) cloudCommitId = commitId;
   state = normaliseCloudState(incoming);
-  restoreSavedStudy(); renderChapters(); renderSummary(); renderMode({autoplay:false});
+  if (planned && activePlan()?.status === 'active' && currentPlanStage()?.id === previousStage) enterPlanStage({autoplay:false});
+  else {
+    planClockStarted = 0; moveStudySurface(false);
+    restoreSavedStudy(); renderChapters(); renderSummary(); renderMode({autoplay:false});
+  }
   const restored = $('#dictation-answer');
   if (caret && restored && !dictationResult) {
     restored.focus({preventScroll:true});
@@ -773,7 +797,8 @@ function applyCloudState(incoming,{commitId} = {}) {
   }
   window.OrdrumStudyUI?.refreshOpenDialog(studyDialog);
 }
-window.addEventListener('ordrum:before-update',() => save());
+window.addEventListener('ordrum:before-update',() => {flushPlanClock();save();});
+window.addEventListener('beforeunload',() => {flushPlanClock();save();});
 window.addEventListener('focus',refreshCalendarViews);
 document.addEventListener('visibilitychange',refreshCalendarViews);
 window.setInterval?.(refreshCalendarViews,60000);

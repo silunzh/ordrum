@@ -4,6 +4,7 @@
 .notebook-manage-book[hidden]{display:none}
 .flash-definition{width:min(100%,500px)}
 #today-plan[hidden]{display:none}
+
 .app-shell{max-width:1480px;padding:0 36px}
 .site-header{height:82px;min-height:0;flex-wrap:nowrap;padding:0}
 .brand{font-size:29px;gap:10px}
@@ -175,3 +176,34 @@ kbd{font-size:10px;background:var(--paper);border-color:var(--line);color:var(--
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 @media(max-width:760px){.chapter-picker>summary{display:flex;align-items:center;justify-content:space-between;padding:8px 1px 12px;list-style:none;cursor:pointer;font-size:12px;color:var(--ink);gap:10px}.chapter-picker>summary::-webkit-details-marker{display:none}.chapter-picker>summary span:last-child{margin-left:auto;font-size:11px;color:var(--muted)}.chapter-picker>summary::after{content:'⌄';font-size:16px;color:var(--muted);line-height:1;transition:transform .15s}.chapter-picker[open]>summary::after{transform:rotate(180deg)}.chapter-picker .chapter-heading h2{display:none}.chapter-picker .chapter-heading{justify-content:flex-end;padding-bottom:8px}}
 @media(max-width:480px){.site-header{height:72px;min-height:0;flex-wrap:nowrap;padding:0;gap:8px}.header-actions{width:auto;justify-content:flex-end;gap:4px}.brand-subtitle{display:none}.brand-icon{width:32px;height:33px;font-size:27px}.header-actions .quiet-button{min-height:40px;padding:7px}.chapter-list{grid-template-columns:repeat(2,minmax(0,1fr));max-height:132px}.chapter-option>span:first-of-type{white-space:nowrap;font-size:11px}.book-select-wrap{max-width:none}.settings-trigger>span:not(.settings-sync-badge){display:inline}}
+
+/* Focused flashcard layout and compact navigation. */
+#home-page[hidden],#plan-page[hidden]{display:none!important}
+.page-nav.active{background:var(--sage);border-radius:7px;color:var(--green)}
+.flash-main{width:100%;max-width:820px;margin:auto}
+.flash-card{min-height:270px;padding:22px 32px 24px;gap:0;border-radius:14px;box-shadow:0 5px 24px #17251a05;justify-content:center}
+.flash-card-tools{display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:14px}
+.flash-card-tools .flash-label{font-size:11px;letter-spacing:.3px;color:var(--muted)}
+.flash-card-tools>div{display:flex;align-items:center;gap:5px}
+.flash-card-tools .sound-button,.flash-card-tools .edit-button{width:34px;height:34px;min-height:34px;display:inline-flex;align-items:center;justify-content:center;padding:7px;border:0;background:transparent;border-radius:7px;color:var(--green)}
+.flash-card-tools .icon{width:17px;height:17px}
+.flash-word{font-size:clamp(36px,4.2vw,53px);line-height:1.15;overflow-wrap:anywhere}
+.flash-source{margin-bottom:0}
+.flash-definition{width:100%;max-width:620px;margin:16px 0 0;padding-top:0;border-top:0}
+.flash-definition .flash-english{font-size:21px;color:var(--ink);line-height:1.5;white-space:pre-line}
+.flash-definition .flash-forms{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:9px;margin:20px 0 0;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.flash-forms .form-row{display:flex;flex-direction:column;gap:4px;font-size:13px;text-align:center;line-height:1.5}
+.flash-forms dt{font-size:10px;color:var(--muted);white-space:normal}
+.flash-forms dd{margin:0;font-size:14px;color:var(--ink);overflow-wrap:anywhere}
+.flash-forms .form-value-button{font-size:inherit;padding:2px 5px;color:inherit;min-height:28px}
+.flash-definition .word-extras{margin-top:16px;padding-top:0;border-top:0}
+.flip-toggle{margin-top:20px;font-size:11px;padding:7px 12px;min-height:34px;color:var(--muted);background:transparent;border-color:var(--line)}
+.flash-actions{margin-top:14px}
+.flash-actions .primary-button,.flash-actions .secondary-button{min-height:44px;padding:11px 16px;font-size:13px}
+.reference-credits{margin-top:18px;font-size:12px;color:var(--muted)}
+.reference-credits summary{cursor:pointer;color:var(--ink)}
+.reference-credits ul{padding-left:18px;line-height:1.8}
+.reference-credits a{color:var(--green);text-decoration:underline}
+@media(max-width:760px){.header-actions{gap:3px}.header-actions .quiet-button{padding:8px;font-size:12px}.brand{font-size:24px}.brand-subtitle{font-size:9px}.flash-card{padding:16px 18px 20px;min-height:240px}.flash-card-tools{margin-bottom:18px}.flash-word{font-size:40px}.flash-definition{margin-top:13px}.flash-english{font-size:20px}.flash-definition .flash-forms{grid-template-columns:repeat(auto-fit,minmax(76px,1fr));margin-top:15px;gap:8px;padding:12px 0}.flash-actions .primary-button,.flash-actions .secondary-button{font-size:12px;padding:10px 7px}.flash-card-tools .sound-button,.flash-card-tools .edit-button{width:38px;min-height:38px}.flash-main>.shortcut-note{display:none}}
+
+@media(max-width:760px){.flash-definition .flash-english{font-size:20px}.flash-card-tools{margin-bottom:12px}.flash-card-tools .sound-button,.flash-card-tools .edit-button{height:38px}}

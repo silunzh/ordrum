@@ -16,6 +16,7 @@ function captureStudySession() {
     notebookChapterIds:state.selectedNotebookChapters || ['all'],
     ...(planKind === 'today' ? {planKind:'today'} : {}),
   };
+  if (isPlanPractice()) { capturePlanCheckpoint(session); return; }
   const task = activeStudyTask();
   const previous = retryMode ? state.reviewSession?.session : task ? task.session : state.studySession;
   const comparison = previous ? {...previous} : null;
@@ -65,7 +66,7 @@ function restoreStudySession(saved) {
   return true;
 }
 function recordStudyResult(wordId,outcome,answer = '') {
-  StudyCore.recordResult(state,wordId,outcome,answer);
+  StudyCore.recordResult(isPlanPractice() ? {...state,activeTaskId:null} : state,wordId,outcome,answer);
   save();
   renderSummary();
 }
@@ -145,6 +146,7 @@ function returnToStudy() {
 function restoreSavedStudy() {
   StudyCore.normalise(state,data);
   window.OrdrumReview?.normalise(state,data);
+  window.OrdrumPlanCore?.normalise(state,data);
   const task = activeStudyTask();
   if (task) selectTaskBook(task);
   const review = state.reviewSession;
@@ -163,6 +165,13 @@ function selectTaskBook(task) {
   }
 }
 function recordReviewAssessment(wordId,outcome,firstAttempt = true) {
+  if (isPlanPractice()) {
+    const prior = activePlan().results[currentPlanStage().id]?.[wordId];
+    const original = state.mode === 'dictation' && !firstAttempt ? dictationAnswers[wordId] : outcome;
+    if (['known','again','correct','wrong','revealed'].includes(original)) recordPlanOutcome(wordId,original);
+    if (prior) return {ok:true,reason:'already-assessed'};
+    if (currentPlanStage()?.assisted) firstAttempt = false;
+  }
   const result = window.OrdrumReview?.record(state,{wordId,sessionId:reviewSessionId,mode:state.mode,outcome,firstAttempt});
   if (result?.ok === false && result.message) notify(result.message);
   return result;
@@ -172,9 +181,10 @@ function startTodayPlan({mode,wordIds}) {
 }
 function skipTodayWord() {
   const word = currentWord(state.mode === 'dictation' ? dictationIndex : flashIndex);
-  if (!word || planKind !== 'today') return;
+  if (!word || !['today','plan'].includes(planKind)) return;
   const result = window.OrdrumReview?.skip(state,word.id,{sessionId:reviewSessionId});
   if (result?.ok === false) { notify(result.message || '暂时无法保存跳过记录。'); return; }
+  if (isPlanPractice()) recordPlanOutcome(word.id,'skip');
   save(); renderSummary();
-  if (state.mode === 'dictation') dictNext(); else if(flashIndex>=currentDeck.length-1) returnToStudy(); else flashMove(1);
+  if (state.mode === 'dictation') dictNext(); else if(flashIndex>=currentDeck.length-1) { if (isPlanPractice()) finishPlanStage(); else returnToStudy(); } else flashMove(1);
 }

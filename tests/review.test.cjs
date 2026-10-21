@@ -8,7 +8,9 @@ vm.runInNewContext(source, sandbox, {filename: 'review.js'});
 const core = sandbox.window.OrdrumReview;
 const plain = value => JSON.parse(JSON.stringify(value));
 const data = {words: Array.from({length: 50}, (_, i) => ({id: `word-${i + 1}`, chapter: i < 25 ? 1 : 2}))};
-const fresh = extra => core.normalise({marks: {}, ...extra}, data);
+// Most original cases exercise a saved pre-methods profile. Empty new profiles
+// are covered separately and now get the explicitly documented recall preset.
+const fresh = extra => core.normalise({marks: {}, reviewPreferences: {reviewLimit: 20, newLimit: 5}, ...extra}, data);
 const at = (day, hour = 12, minute = 0) => new Date(2026, 9, day, hour, minute);
 let sequence = 0, passed = 0;
 const answer = (state, wordId, outcome, when, sessionId = `session-${++sequence}`, mode = ['known', 'again'].includes(outcome) ? 'flashcard' : 'dictation') => core.record(state, {wordId, outcome, at: when, mode, sessionId, id: `event-${++sequence}`});
@@ -103,10 +105,10 @@ test('skip removes a word only for the current local calendar day', () => {
   assert.equal(core.getPlan(state, data, {now: at(21, 13)}).skippedToday, 1);
   assert.equal(core.getPlan(state, data, {now: at(22)}).dueIds.includes('word-1'), true);assert.equal(row(state).objectiveAttempts, 0);
 });
-test('selection scope excludes unrelated words and progress counts', () => {
+test('selection scope excludes unrelated cards while preserving a global daily allocation', () => {
   const state = fresh();answer(state, 'word-1', 'known', at(20));answer(state, 'word-2', 'known', at(21));
   const plan = core.getPlan(state, data, {now: at(21), wordIds: new Set(['word-26', 'word-27'])});
-  assert.deepEqual(plain(plan.wordIds), ['word-26', 'word-27']);assert.equal(plan.scopeCount, 2);assert.equal(plan.newToday, 0);
+  assert.deepEqual(plain(plan.wordIds), ['word-26', 'word-27']);assert.equal(plan.scopeCount, 2);assert.equal(plan.newToday, 1);assert.equal(plan.scopeNewToday, 0);
 });
 test('empty selection is safe and schedules nothing', () => {
   const plan = core.getPlan(fresh(), data, {now: at(21), wordIds: []});assert.equal(plan.scopeCount, 0);assert.equal(plan.wordIds.length, 0);
@@ -140,7 +142,7 @@ test('future clock events do not prematurely alter a current plan', () => {
 });
 test('preferences accept explicit modest values and reject invalid intervals', () => {
   const state = fresh();core.setPreferences(state, {reviewLimit: 999, newLimit: -4, intervals: [1, 2, 4, 8, 16]}, at(21));
-  assert.equal(state.reviewPreferences.reviewLimit, 100);assert.equal(state.reviewPreferences.newLimit, 0);assert.deepEqual(plain(state.reviewPreferences.intervals), [1, 2, 4, 8, 16]);
+  assert.equal(state.reviewPreferences.reviewLimit, 200);assert.equal(state.reviewPreferences.newLimit, 0);assert.deepEqual(plain(state.reviewPreferences.intervals), [1, 2, 4, 8, 16]);
   core.setPreferences(state, {intervals: [1, 2, 2, 5, 8]}, at(21));assert.deepEqual(plain(state.reviewPreferences.intervals), [1, 3, 7, 14, 30]);
 });
 test('local midnight, rather than elapsed 24 hours, makes a one-day card due', () => {
@@ -251,6 +253,95 @@ test('skipping an as-yet unscheduled word keeps tomorrow eligibility without inv
   const state = fresh();core.skip(state, 'word-1', {at: at(21), id: 'skip-new'});
   const plan = core.getPlan(state, data, {now: at(21), wordIds: ['word-1']});
   assert.equal(plan.wordIds.length, 0);assert.equal(new Date(plan.nextDueAt).getTime(), new Date(2026, 9, 22).getTime());assert.equal(Object.keys(core.schedules(state, at(21))).length, 0);
+});
+
+test('a genuinely empty new profile defaults to the recall workload while saved legacy limits stay intact', () => {
+  const current = core.cleanPreferences({});assert.equal(current.method, 'recall');assert.equal(current.newLimit, 30);assert.equal(current.reviewLimit, 90);assert.equal(current.targetMinutes, 60);
+  const legacy = core.cleanPreferences({newLimit: 3, reviewLimit: 12, intervals: [1, 2, 4, 8, 20], paused: true});
+  assert.equal(legacy.newLimit, 3);assert.equal(legacy.reviewLimit, 12);assert.equal(legacy.paused, true);assert.deepEqual(plain(legacy.intervals), [1, 2, 4, 8, 20]);
+});
+test('explicit method presets change workload and intervals without resuming a paused plan or changing its scope', () => {
+  const state = fresh();core.setPreferences(state, {paused: true, scope: {kind: 'chapters', chapterIds: [2]}}, at(21));
+  const result = core.applyPreset(state, 'dictation', at(22));assert.equal(result.ok, true);assert.equal(state.reviewPreferences.method, 'dictation');assert.equal(state.reviewPreferences.reviewLimit, 80);assert.equal(state.reviewPreferences.newLimit, 20);assert.equal(state.reviewPreferences.chunkSize, 10);
+  assert.equal(state.reviewPreferences.paused, true);assert.deepEqual(plain(state.reviewPreferences.scope.chapterIds), [2]);assert.deepEqual(plain(state.reviewPreferences.intervals), [1, 2, 5, 12, 30]);
+  const before = plain(state);assert.equal(core.applyPreset(state, 'made-up', at(23)).ok, false);assert.deepEqual(plain(state), before);
+});
+test('preferences enforce bounded editable limits time chunk sizes and allowlisted scope', () => {
+  const prefs = core.cleanPreferences({method: 'unsafe', targetMinutes: 999, chunkSize: 2, reviewLimit: 400, newLimit: 170,
+    scope: {kind: 'chapters', chapterIds: [2, 1, 2, -1, '3', 1001], notebookChapterIds: ['all', 'today', '__proto__', 'all', 'unit-1'], credential: 'never-keep'}});
+  assert.equal(prefs.method, 'recall');assert.equal(prefs.targetMinutes, 180);assert.equal(prefs.chunkSize, 10);assert.equal(prefs.reviewLimit, 200);assert.equal(prefs.newLimit, 170);
+  assert.deepEqual(plain(prefs.scope), {kind: 'chapters', chapterIds: [1, 2], notebookChapterIds: ['all', 'today', 'unit-1']});assert.equal(JSON.stringify(prefs).includes('never-keep'), false);
+});
+test('preset descriptors are defensive copies and expose distinct practical workloads', () => {
+  const methods = core.getMethods();assert.deepEqual(plain(methods.map(row => [row.id, row.newLimit + row.reviewLimit])), [['recall', 120], ['dictation', 100], ['quick', 200]]);
+  methods[0].intervals[0] = 99;methods[0].steps[0] = 'changed';assert.equal(core.getMethods()[0].intervals[0], 1);assert.equal(core.getMethods()[0].steps[0], '新词预览');
+});
+test('changing selected chapters cannot bypass either global daily budget', () => {
+  const state = fresh();core.setPreferences(state, {newLimit: 1, reviewLimit: 1}, at(21));
+  answer(state, 'word-1', 'known', at(20));answer(state, 'word-2', 'known', at(20));answer(state, 'word-1', 'known', at(21, 8));answer(state, 'word-3', 'known', at(21, 8));
+  const plan = core.buildDailyPlan(state, data, {now: at(21), wordIds: ['word-2', 'word-26']});
+  assert.equal(plan.newToday, 1);assert.equal(plan.reviewedToday, 1);assert.equal(plan.remainingNew, 0);assert.equal(plan.remainingReview, 0);assert.deepEqual(plain(plan.wordIds), []);assert.equal(plan.scopeNewToday, 0);assert.equal(plan.scopeReviewedToday, 0);
+});
+test('daily summary separates distinct contacted words first answers and self ratings', () => {
+  const state = fresh();answer(state, 'word-1', 'wrong', at(21, 8), 'bad-round');answer(state, 'word-1', 'correct', at(21, 9), 'bad-round');
+  answer(state, 'word-2', 'known', at(21, 8));answer(state, 'word-3', 'revealed', at(21, 8));answer(state, 'word-4', 'correct', at(21, 8));core.skip(state, 'word-5', {at: at(21)});
+  const metrics = core.dailyMetrics(state, at(21));assert.equal(metrics.contactedToday, 4);assert.equal(metrics.answeredContacts, 4);assert.equal(metrics.objectiveAttempts, 2);assert.equal(metrics.objectiveCorrect, 1);assert.equal(metrics.objectivePercent, 50);assert.equal(metrics.selfKnown, 1);assert.equal(metrics.revealed, 1);
+  assert.equal(core.dailyMetrics(state, at(22)).objectivePercent, null);
+});
+const sessionPlan = method => {
+  const preferences = core.cleanPreferences({...core.getMethods().find(row => row.id === method), method});
+  const dueIds = Array.from({length: preferences.reviewLimit}, (_, i) => `due-${i + 1}`), newIds = Array.from({length: preferences.newLimit}, (_, i) => `new-${i + 1}`);
+  return {day: '2026-10-21', wordIds: [...dueIds, ...newIds], dueIds, newIds, preferences, paused: false};
+};
+test('recall session previews new words uses bounded chunks and ends in dynamic difficult dictation', () => {
+  const plan = sessionPlan('recall'), before = plain(plan), session = core.buildSession(plan, {id: 'recall-session', now: at(21)});
+  assert.equal(session.method, 'recall');assert.equal(session.wordIds.length, 120);assert.equal(session.stages[0].mode, 'preview');assert.equal(session.stages[0].wordIds.length, 20);
+  assert.equal(session.stages.filter(stage => stage.phase === 'main').length, 6);assert.ok(session.stages.filter(stage => stage.selector === 'all').every(stage => stage.wordIds.length <= 20));
+  const final = session.stages.at(-1);assert.equal(final.mode, 'dictation');assert.equal(final.selector, 'difficult');assert.equal(final.maxWords, 20);assert.equal(session.maximumContacts, 170);assert.equal(session.estimatedMinutes, 54);
+  assert.deepEqual(plain(plan), before);plan.preferences.intervals[0] = 99;assert.equal(session.preferences.intervals[0], 1);
+});
+test('dictation session retries are assisted practice and each actual group is at most ten cards', () => {
+  const session = core.buildSession(sessionPlan('dictation'), {id: 'dictation-session', now: at(21)});
+  assert.equal(session.stages.filter(stage => stage.phase === 'main').length, 10);assert.ok(session.stages.filter(stage => stage.phase === 'main').every(stage => stage.mode === 'dictation' && stage.wordIds.length === 10));
+  const retries = session.stages.filter(stage => stage.phase === 'retry');assert.equal(retries.length, 2);assert.equal(retries[0].assisted, true);assert.equal(retries[1].chunkOffset, 10);assert.equal(retries[1].selector, 'errors');assert.equal(session.estimatedMinutes, 60);
+});
+test('quick session interleaves old and new cards then reinforces and samples separately', () => {
+  const session = core.buildSession(sessionPlan('quick'), {id: 'quick-session', now: at(21)});
+  assert.equal(session.stages.some(stage => stage.phase === 'preview'), false);assert.deepEqual(plain(session.stages[0].wordIds.slice(0, 5)), ['due-1', 'due-2', 'due-3', 'due-4', 'new-1']);
+  assert.equal(session.stages.at(-2).selector, 'difficult');assert.equal(session.stages.at(-2).maxWords, 25);assert.equal(session.stages.at(-1).selector, 'sample');assert.equal(session.stages.at(-1).mode, 'dictation');assert.equal(session.estimatedMinutes, 57);
+});
+test('dynamic difficult selection retains any first difficulty even when later self ratings are known', () => {
+  const stage = {id: 'stage-hard', wordIds: ['word-1', 'word-2', 'word-3'], selector: 'difficult', maxWords: 20};
+  const results = [{'word-1': 'again', 'word-2': 'known', 'word-3': 'wrong'}, {'word-1': 'known', 'word-3': {outcome: 'correct'}}];
+  assert.deepEqual(plain(core.selectStageWords(stage, {results})), ['word-1', 'word-3']);assert.deepEqual(plain(core.selectStageWords({...stage, selector: 'errors'}, {results})), ['word-3']);
+});
+test('dynamic retry chunks partition a frozen failure pool without duplicates', () => {
+  const session = core.buildSession(sessionPlan('dictation'), {id: 'partition-session', now: at(21)});
+  const failures = Object.fromEntries(session.wordIds.slice(0, 30).map(id => [id, 'wrong']));
+  const retries = session.stages.filter(stage => stage.phase === 'retry').flatMap(stage => plain(core.selectStageWords(stage, {results: failures})));
+  assert.equal(retries.length, 20);assert.equal(new Set(retries).size, 20);assert.deepEqual(plain(retries), plain(session.wordIds.slice(0, 20)));
+});
+test('sample chunks share a stable ordering prioritize difficulty and never repeat a sampled card', () => {
+  const plan = sessionPlan('quick');plan.preferences.chunkSize = 10;
+  const session = core.buildSession(plan, {id: 'sample-session', now: at(21)}), results = {'due-199': 'wrong', 'new-40': 'again'};
+  const samples = session.stages.filter(stage => stage.phase === 'test').flatMap(stage => plain(core.selectStageWords(stage, {results})));
+  assert.equal(samples.length, 20);assert.equal(new Set(samples).size, 20);assert.equal(samples[0], 'new-40');
+  assert.deepEqual(plain(samples), plain(session.stages.filter(stage => stage.phase === 'test').flatMap(stage => plain(core.selectStageWords(stage, {results})))));
+  assert.notDeepEqual(plain(samples), plain(session.wordIds.slice(0, 20)));
+});
+test('sessions freeze selected words and produce stable safe stage IDs without collecting pretend events', () => {
+  const state = fresh(), plan = core.getPlan(state, data, {now: at(21)}), session = core.buildSession(plan, {id: 'stable-session', now: at(21)});
+  const before = plain(session);plan.wordIds.reverse();assert.deepEqual(plain(session), before);assert.equal(Object.keys(state.reviewEvents).length, 0);
+  assert.equal(new Set(session.stages.map(stage => stage.id)).size, session.stages.length);assert.ok(session.stages.every(stage => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(stage.id)));
+  assert.equal(core.buildSession({...plan, paused: true}), null);assert.equal(core.buildSession({...plan, wordIds: []}), null);
+});
+test('empty and sparse plans receive honest workload estimates rather than a guaranteed hour', () => {
+  assert.equal(core.estimateMinutes({newIds: [], dueIds: [], preferences: core.cleanPreferences({})}), 0);
+  assert.ok(core.estimateMinutes({newIds: ['word-1'], dueIds: [], preferences: core.cleanPreferences({})}) < 60);
+});
+test('capacity reports remaining space without modifying or silently pruning history', () => {
+  const state = fresh();answer(state, 'word-1', 'known', at(21));const before = plain(state), info = core.capacity(state);
+  assert.equal(info.maximum, 10000);assert.equal(info.maximumEventBytes, 1600000);assert.equal(info.remainingEvents, 9999);assert.ok(info.remainingEventBytes > 0);assert.ok(info.remainingStateBytes > 0);assert.equal(info.nearLimit, false);assert.deepEqual(plain(state), before);
 });
 
 console.log(`${passed} review tests passed.`);

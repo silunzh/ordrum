@@ -72,33 +72,51 @@ async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
     const app=harness();app.commit({marks:{'åäö':{status:'known'}},tasks:[]},4);
     const first=await(await app.api.transport('GET')).json();assert.equal(first.state.marks['åäö'].status,'known');
     const written=await(await app.api.transport('PUT',{state:{marks:{'Ångström':{status:'known'}}},baseRevision:4,expectedAccountId:accountId})).json();
-    assert.equal(written.revision,5);assert.equal(app.server.record.version,3);assert.equal(app.server.record.state.marks['Ångström'].status,'known');assert.equal(app.requests.find(r=>r.options.method==='PUT').body.sha,sha(4));assert.equal(app.writes,1);
+    assert.equal(written.revision,5);assert.equal(app.server.record.version,4);assert.equal(app.server.record.state.marks['Ångström'].status,'known');assert.equal(app.requests.find(r=>r.options.method==='PUT').body.sha,sha(4));assert.equal(app.writes,1);
     assert.equal(JSON.stringify(app.server.record).includes(token),false);assert.equal(own(written,'sha'),false);
   });
-  await test('version 1/2 progress upgrades to version 3 while preserving notebook units and account identity',async()=>{
+  await test('version 1/2 progress upgrades to version 4 while preserving notebook units and account identity',async()=>{
     const app=harness();const units={'unit-1':{id:'unit-1',name:'错词单元 1',wordIds:['å','ä','ö'],updatedAt:'2026-10-21T12:00:00.000Z'}};
     app.commit({marks:{},notebookUnits:units,reviewEvents:{event1:{id:'event1',wordId:'å'}}},7,2);
     const priorRecord=await(await app.api.transport('GET')).json();assert.deepEqual(priorRecord.state.notebookUnits,units);
     const nextState={...priorRecord.state,marks:{å:{status:'known'}}};
     await app.api.transport('PUT',{state:nextState,baseRevision:7,expectedAccountId:accountId});
-    assert.equal(app.server.record.version,3);assert.equal(app.server.record.revision,8);assert.equal(app.server.record.accountId,accountId);assert.deepEqual(app.server.record.state.notebookUnits,units);
+    assert.equal(app.server.record.version,4);assert.equal(app.server.record.revision,8);assert.equal(app.server.record.accountId,accountId);assert.deepEqual(app.server.record.state.notebookUnits,units);
     const reread=await(await app.api.transport('GET')).json();assert.deepEqual(reread.state.notebookUnits,units);assert.equal(reread.state.marks.å.status,'known');
-    await app.api.transport('PUT',{state:reread.state,baseRevision:8,expectedAccountId:accountId});assert.equal(app.server.record.version,3);assert.equal(app.server.record.revision,9);
+    await app.api.transport('PUT',{state:reread.state,baseRevision:8,expectedAccountId:accountId});assert.equal(app.server.record.version,4);assert.equal(app.server.record.revision,9);
   });
-  await test('new empty repositories start with a version 3 progress envelope',async()=>{
+  await test('new empty repositories start with a version 4 progress envelope',async()=>{
     const app=harness();await app.api.transport('PUT',{state:{marks:{},notebookUnits:{}},baseRevision:0,expectedAccountId:accountId});
-    assert.equal(app.server.record.version,3);assert.equal(app.server.record.revision,1);assert.deepEqual(app.server.record.state.notebookUnits,{});
+    assert.equal(app.server.record.version,4);assert.equal(app.server.record.revision,1);assert.deepEqual(app.server.record.state.notebookUnits,{});
   });
-  await test('the deployed version 1 reader contract rejects version 3 before any stale-client write',async()=>{
+  await test('the deployed version 1 reader contract rejects version 4 before any stale-client write',async()=>{
     // Keep the exact legacy version guard inline so this compatibility check
     // also runs in a shallow Pages checkout without historical Git objects.
-    const guard='![1,2,RECORD_VERSION].includes(record.version)';assert.equal(source.split(guard).length,2);
+    const guard='![1,2,3,RECORD_VERSION].includes(record.version)';assert.equal(source.split(guard).length,2);
     const legacyReader=source.replace(guard,'![1,2].includes(record.version)');
     const app=harness({sourceOverride:legacyReader});const units={'unit-1':{wordIds:['å','ä','ö']}};
-    app.commit({marks:{},notebookUnits:units},8,3);
+    app.commit({marks:{},notebookUnits:units},8,4);
     await assert.rejects(app.api.transport('GET'),error=>error.code==='GITHUB_INVALID_FILE');
     await assert.rejects(app.api.transport('PUT',{state:{marks:{å:{status:'known'}}},baseRevision:8,expectedAccountId:accountId}),error=>error.code==='GITHUB_INVALID_FILE');
-    assert.equal(app.writes,0);assert.equal(app.requests.some(request=>request.options.method==='PUT'),false);assert.equal(app.server.record.version,3);assert.deepEqual(app.server.record.state.notebookUnits,units);
+    assert.equal(app.writes,0);assert.equal(app.requests.some(request=>request.options.method==='PUT'),false);assert.equal(app.server.record.version,4);assert.deepEqual(app.server.record.state.notebookUnits,units);
+  });
+  await test('version 1/2/3 envelopes remain readable and upgrade plan sessions intact to version 4',async()=>{
+    for(const version of [1,2,3]){
+      const app=harness(),plans={'plan-one':{id:'plan-one',status:'paused',stageIndex:1,wordIds:['word'],stages:[{id:'stage-one'}],results:{'stage-one':{word:{outcome:'wrong',at:'2026-10-21T12:00:00.000Z'}}},completedStages:{'stage-one':true},elapsedMs:60000}};
+      app.commit({planSessions:plans,activePlanId:'plan-one',reviewPreferences:{method:'dictation',newLimit:20,reviewLimit:80}},7,version);
+      const prior=await(await app.api.transport('GET')).json();assert.deepEqual(prior.state.planSessions,plans);
+      await app.api.transport('PUT',{state:prior.state,baseRevision:7,expectedAccountId:accountId});
+      assert.equal(app.server.record.version,4);assert.deepEqual(app.server.record.state.planSessions,plans);assert.equal(app.server.record.state.activePlanId,'plan-one');assert.equal(app.server.record.accountId,accountId);
+    }
+  });
+  await test('the deployed version 3 reader refuses version 4 before any stale plan-erasing PUT',async()=>{
+    const guard='![1,2,3,RECORD_VERSION].includes(record.version)';assert.equal(source.split(guard).length,2);
+    const legacyReader=source.replace('const RECORD_VERSION = 4;','const RECORD_VERSION = 3;').replace(guard,'![1,2,RECORD_VERSION].includes(record.version)');
+    const app=harness({sourceOverride:legacyReader}),plans={'plan-one':{id:'plan-one',results:{stage:{word:{outcome:'wrong',at:'2026-10-21T12:00:00Z'}}}}};
+    app.commit({planSessions:plans,activePlanId:'plan-one'},8,4);
+    await assert.rejects(app.api.transport('GET'),error=>error.code==='GITHUB_INVALID_FILE');
+    await assert.rejects(app.api.transport('PUT',{state:{marks:{}},baseRevision:8,expectedAccountId:accountId}),error=>error.code==='GITHUB_INVALID_FILE');
+    assert.equal(app.writes,0);assert.equal(app.requests.some(request=>request.options.method==='PUT'),false);assert.deepEqual(app.server.record.state.planSessions,plans);
   });
   await test('a stale revision or different account returns current state without writing',async()=>{
     const app=harness();app.commit({tasks:[{id:'remote'}]},3);

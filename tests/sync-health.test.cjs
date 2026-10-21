@@ -85,4 +85,16 @@ test('an incomplete sync journal hides recovery restore until durable account ad
   const app=harness();app.api.saveRecovery({marks:{a:'known'}},scope);const element=target();app.api.mount(element,{getScope:()=>scope});assert.ok(element.buttons.has('restore'));
   app.setHealth({status:'error',online:true,recoveryPending:true,pending:{knownBaseline:true,count:1,groups:{marks:1}}});assert.equal(element.buttons.has('restore'),false);assert.match(element.innerHTML,/同步恢复记录尚未提交/);
 });
+test('recovery snapshots preserve complete plan progress and active plan position without nested credentials',()=>{
+  const app=harness(),plan={id:'p',status:'paused',results:{stage:{word:{outcome:'wrong',at:'2026-10-21T12:00:00Z'}}},resolvedStages:{stage:['word']},stageSessions:{stage:{draft:'åäö',updatedAt:'2026-10-21T12:00:00Z',token:'secret'}},completedStages:{stage:true},preferences:{method:'quick',chunkSize:25}};
+  assert.equal(app.api.saveRecovery({planSessions:{p:plan},activePlanId:'p'},scope).ok,true);
+  const state=clone(app.api.getRecovery(scope).backup.state);assert.equal(state.activePlanId,'p');assert.equal(state.planSessions.p.results.stage.word.outcome,'wrong');assert.equal(state.planSessions.p.stageSessions.stage.draft,'åäö');assert.equal(state.planSessions.p.stageSessions.stage.token,undefined);assert.equal(state.planSessions.p.preferences.method,'quick');
+});
+test('recovery comparison reports plan records separately and includes active plan position changes',()=>{
+  const {api}=harness(),before={planSessions:{old:{id:'old'},same:{id:'same',status:'paused'}},activePlanId:'old'},after={planSessions:{next:{id:'next'},same:{id:'same',status:'completed'}},activePlanId:'next'};
+  const comparison=clone(api.preview(before,after));assert.deepEqual(comparison.planSessions,{added:1,changed:1,removed:1,total:3});assert.equal(comparison.other.total,1);assert.equal(comparison.count,4);assert.match(api.previewMarkup(comparison),/学习计划/);
+});
+test('pending sync health labels plan sessions without exposing their content',()=>{
+  const app=harness({health:{status:'pending',online:true,pending:{knownBaseline:true,count:2,groups:{planSessions:1,positions:1}}}}),element=target();app.api.mount(element,{getScope:()=>scope});assert.match(element.innerHTML,/学习计划 1/);assert.match(element.innerHTML,/学习位置 1/);
+});
 console.log(`\n${passed} sync health checks passed.`);

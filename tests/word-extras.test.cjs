@@ -75,8 +75,6 @@ function sandbox(fetch=async()=>response(page(fixture))){
   vm.createContext(context);vm.runInContext(source,context);
   return {api:window.OrdrumWordExtras,window,calls,timers,events,advance(ms){clock+=ms;}};
 }
-function commonsPage(overrides={}){return {title:'File:Sv-god.ogg',imageinfo:[{url:'https://upload.wikimedia.org/wikipedia/commons/8/86/Sv-god.ogg?utm_source=commons',mime:'application/ogg',extmetadata:{LicenseShortName:{value:'CC BY-SA 3.0'},Artist:{value:'<a href="x">Reader</a>'},Restrictions:{value:''}},...overrides}]};}
-
 (async()=>{
 await test('parser isolates Swedish and the requested part of speech with nested definitions',()=>{
   const {api}=sandbox(),value=api.parse(fixture,{lemma:'god',pos:'adjective'},{title:'god',revision:123});
@@ -98,10 +96,10 @@ await test('noun and phrase queries cannot borrow adjective examples or synonym 
   const numeral='==Swedish==\n===Numeral===\n# three\n#: {{ux|sv|tre barn|three children}}';
   assert.equal(api.parse(numeral,{pos:'number'}).examples.length,1);
 });
-await test('IPA qualifiers and file templates stay Swedish and exclude other POS pronunciation',()=>{
+await test('only explicitly Swedish IPA is extracted and recordings and qualifier labels are omitted',()=>{
   const value=sandbox().api.parse(fixture,{pos:'adjective'});
-  assert.deepEqual(plain(value.pronunciations).map(x=>[x.text,x.label]),[['/ɡuːd/','IPA'],['/ɡuː/','colloquial']]);
-  assert.deepEqual(plain(value.files),[{file:'Sv-god.ogg',label:'Sweden'}]);
+  assert.deepEqual(plain(value.pronunciations),[{text:'/ɡuːd/',kind:'ipa'},{text:'/ɡuː/',kind:'ipa'}]);
+  assert.equal(value.files,undefined);assert.equal(sandbox().api.audioInfo,undefined);
 });
 await test('language headings require exactly Swedish while CRLF and a final language section work',()=>{
   const {api}=sandbox();assert.equal(api.parse('== Swedish ==\r\n===Verb===\r\n# act\r\n#: {{ux|sv|Jag gör.|I do.}}',{pos:'verb'}).examples.length,1);
@@ -119,9 +117,9 @@ await test('nested templates use displayed Swedish terms and numeric parameters 
   const {api}=sandbox(),value=api.parse('==Swedish==\n===Verb===\n# act\n#: {{ux|1=sv|2=Jag {{l|sv|göra|gör|do}}.|3=I do.}}',{pos:'verb'});
   assert.equal(value.examples[0].sv,'Jag gör.');assert.equal(value.examples[0].en,'I do.');
 });
-await test('parser caps untrusted lists and rejects audio markup with control or query separators',()=>{
-  const text='==Swedish==\n===Noun===\n# thing\n'+Array.from({length:20},(_,i)=>`#: {{ux|sv|ord ${i}|word ${i}}}\n#: {{syn|sv|term${i}}}\n* {{audio|sv|safe${i}.ogg}}`).join('\n')+'\n* {{audio|sv|bad\u0001.ogg}}\n* {{audio|sv|bad#file.ogg}}';
-  const value=sandbox().api.parse(text,{pos:'noun'});assert.equal(value.examples.length,3);assert.equal(value.synonyms.length,6);assert.equal(value.files.length,4);
+await test('parser caps untrusted lists and entirely ignores audio templates',()=>{
+  const text='==Swedish==\n===Noun===\n# thing\n'+Array.from({length:20},(_,i)=>`#: {{ux|sv|ord ${i}|word ${i}}}\n#: {{syn|sv|term${String.fromCharCode(97+i)}}}\n* {{audio|sv|safe${i}.ogg}}`).join('\n')+'\n* {{audio|sv|bad\u0001.ogg}}\n* {{audio|sv|bad#file.ogg}}';
+  const value=sandbox().api.parse(text,{pos:'noun'});assert.equal(value.examples.length,3);assert.equal(value.synonyms.length,6);assert.equal(value.files,undefined);
 });
 await test('dictionary request is CORS public-only, credential-free and preserves original word objects',async()=>{
   const {api,calls,timers}=sandbox();const word=Object.freeze({swedish:'en god',lemma:'god',pos:'adjective',english:'original',overrides:Object.freeze({english:'custom'})});
@@ -154,67 +152,16 @@ await test('rate limits and malformed or API error responses surface safe source
   const apiError=sandbox(async()=>response({error:{info:'<script>unsafe</script>'}}));await assert.rejects(apiError.api.load({lemma:'god'}),/繁忙/);
   const invalid=sandbox(async()=>response('<html>error</html>'));await assert.rejects(invalid.api.load({lemma:'god'}));
 });
-await test('Commons audio uses matching filenames, audio MIME, HTTPS upload host and explicit reusable license',async()=>{
-  const env=sandbox(async()=>response({query:{pages:[commonsPage()]}}));
-  const values=await env.api.audioInfo({files:[{file:'Sv-god.ogg',label:'Sweden'}]});
-  assert.equal(values.length,1);assert.equal(values[0].url,'https://upload.wikimedia.org/wikipedia/commons/8/86/Sv-god.ogg');assert.equal(values[0].license,'CC BY-SA 3.0');assert.equal(values[0].author,'Reader');
-  assert.equal(new URL(env.calls[0].url).origin,'https://commons.wikimedia.org');assert.equal(env.calls[0].options.credentials,'omit');
-});
-await test('ported CC licenses require a matching canonical Creative Commons license URL',async()=>{
-  const metadata={LicenseShortName:{value:'CC BY 2.0 fr'},LicenseUrl:{value:'https://creativecommons.org/licenses/by/2.0/fr/deed.en'},Restrictions:{value:''}};
-  const env=sandbox(async()=>response({query:{pages:[commonsPage({extmetadata:metadata})]}}));
-  const audio=await env.api.audioInfo({files:[{file:'Sv-god.ogg'}]});assert.equal(audio.length,1);assert.equal(audio[0].license,'CC BY 2.0 fr');
-  for(const valid of ['http://creativecommons.org/licenses/by/2.0/fr/','https://creativecommons.org/licenses/by/2.0/fr/deed.zh-hans']){const canonical=sandbox(async()=>response({query:{pages:[commonsPage({extmetadata:{...metadata,LicenseUrl:{value:valid}}})]}}));assert.equal((await canonical.api.audioInfo({files:[{file:'Sv-god.ogg'}]})).length,1);}
-  for(const url of ['https://creativecommons.org.evil.test/licenses/by/2.0/fr/','https://creativecommons.org/licenses/by-sa/2.0/fr/','https://creativecommons.org/licenses/by/3.0/fr/','https://creativecommons.org/licenses/by/2.0/de/','https://creativecommons.org/licenses/by/2.0/fr/deed.en/extra','javascript:alert(1)','']){
-    const invalid=sandbox(async()=>response({query:{pages:[commonsPage({extmetadata:{...metadata,LicenseUrl:{value:url}}})]}}));assert.equal((await invalid.api.audioInfo({files:[{file:'Sv-god.ogg'}]})).length,0);
-  }
-  const unsupported=sandbox(async()=>response({query:{pages:[commonsPage({extmetadata:{...metadata,LicenseShortName:{value:'CC BY 2.0 fr unrestricted text'}}})]}}));assert.equal((await unsupported.api.audioInfo({files:[{file:'Sv-god.ogg'}]})).length,0);
-});
-await test('Commons refuses unrelated files, non-audio content, redirects hosts and misleading license strings',async()=>{
-  const cases=[{url:'http://upload.wikimedia.org/wikipedia/commons/a/a/audio.ogg'},{url:'https://upload.wikimedia.org.evil.test/audio.ogg'},{url:'https://upload.wikimedia.org:8443/wikipedia/commons/a/a/audio.ogg'},{url:'https://upload.wikimedia.org/wikipedia/commons/a/a/image.svg'},{mime:'text/html'},{extmetadata:{LicenseShortName:{value:'No CC BY permission'}}},{extmetadata:{LicenseShortName:{value:'CC BY-SA 4.0'},Restrictions:{value:'restricted'}}}];
-  for(const bad of cases){const env=sandbox(async()=>response({query:{pages:[commonsPage(bad)]}}));assert.equal((await env.api.audioInfo({files:[{file:'Sv-god.ogg'}]})).length,0);}
-  const unrelated=commonsPage();unrelated.title='File:Other.ogg';const env=sandbox(async()=>response({query:{pages:[unrelated]}}));assert.equal((await env.api.audioInfo({files:[{file:'Sv-god.ogg'}]})).length,0);
-});
 await test('cancel and immediate reenable cannot let an older aborted request clear the new loading state',async()=>{
   const first=deferred(),second=deferred();let n=0;const env=sandbox(()=>++n===1?first.promise:second.promise),host=new Host();
   env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('examples');assert.equal(env.calls.length,1);host.click('examples');host.click('examples');assert.equal(env.calls.length,2);
-  first.reject(new Error('old failure'));await tick();assert.match(host.innerHTML,/正在查询参考源/);assert.ok(!host.innerHTML.includes('old failure'));
-  second.resolve(response(page(fixture)));await tick();assert.ok(host.innerHTML.includes('en god människa'));assert.ok(!host.innerHTML.includes('正在查询参考源'));env.api.unmount();
+  first.reject(new Error('old failure'));await tick();assert.match(host.innerHTML,/正在查询…/);assert.ok(!host.innerHTML.includes('old failure'));
+  second.resolve(response(page(fixture)));await tick();assert.ok(host.innerHTML.includes('en god människa'));assert.ok(!host.innerHTML.includes('正在查询…'));env.api.unmount();
 });
 await test('late responses from an unmounted word cannot overwrite a later card',async()=>{
   const first=deferred(),env=sandbox(()=>first.promise),oldHost=new Host(),newHost=new Host();
   env.api.mount(oldHost,{lemma:'god',pos:'adjective'});oldHost.click('examples');env.api.mount(newHost,{lemma:'barn',pos:'noun'});const before=newHost.innerHTML;
   first.resolve(response(page(fixture)));await tick();assert.equal(newHost.innerHTML,before);assert.equal(env.calls[0].options.signal.aborted,true);env.api.unmount();
-});
-await test('toggling related text and remounting the same card preserve the exact audio element without autoplay',async()=>{
-  const env=sandbox(async url=>response(url.startsWith('https://commons.')?{query:{pages:[commonsPage()]}}:page(fixture))),host=new Host();let stops=0;
-  const word=Object.freeze({lemma:'god',pos:'adjective'});env.api.mount(host,word,{onStop(){stops++;}});host.click('pronunciations');await tick();
-  assert.equal(host.audios.length,1);const audio=host.audios[0];assert.equal(audio.pauseCount,0);assert.ok(!host.innerHTML.includes('autoplay'));
-  audio.events.play();assert.equal(stops,1);host.click('examples');assert.equal(host.audios[0],audio);assert.equal(audio.pauseCount,0);assert.equal(audio.loadCount,0);
-  const writes=host.writes;env.api.mount(host,word);assert.equal(host.writes,writes);assert.equal(host.audios[0],audio);
-  host.click('pronunciations');assert.equal(audio.pauseCount,1);assert.equal(audio.loadCount,1);assert.equal(audio.src,null);env.api.unmount();
-});
-await test('pending and failed Commons requests preserve text and IPA, with an audio-only retry',async()=>{
-  const waiting=deferred();let audioCalls=0;
-  const env=sandbox(async url=>{if(url.startsWith('https://commons.'))return ++audioCalls===1?waiting.promise:response({query:{pages:[commonsPage()]}});return response(page(fixture));}),host=new Host();
-  env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('examples');await tick();host.click('synonyms');host.click('pronunciations');await tick();
-  assert.ok(host.innerHTML.includes('en god människa'));assert.ok(host.innerHTML.includes('välsmakande'));assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.match(host.innerHTML,/正在查询录音来源/);
-  assert.ok(!host.innerHTML.includes('此来源未提供读音版本'));
-  waiting.resolve(response('{}',{status:503}));await tick();assert.ok(host.innerHTML.includes('en god människa'));assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.match(host.innerHTML,/录音来源暂不可用/);
-  const retry=host.querySelector('[data-extra-audio-retry]');assert.ok(retry);retry.events.click({stopPropagation(){}});await tick();
-  assert.equal(host.audios.length,1);assert.ok(!host.innerHTML.includes('录音来源暂不可用'));assert.equal(audioCalls,2);assert.equal(env.calls.filter(x=>x.url.startsWith('https://en.wiktionary.')).length,1);env.api.unmount();
-});
-await test('initial pronunciation lookup shows verified IPA before the recording request finishes',async()=>{
-  const waiting=deferred(),env=sandbox(async url=>url.startsWith('https://commons.')?waiting.promise:response(page(fixture))),host=new Host();
-  env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('pronunciations');await tick();
-  assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.match(host.innerHTML,/正在查询录音来源/);assert.ok(host.innerHTML.includes('Wiktionary 瑞典语条目'));
-  host.click('examples');host.click('pronunciations');assert.ok(host.innerHTML.includes('en god människa'));assert.ok(!host.innerHTML.includes('extra-ipa'));assert.equal(env.calls[1].options.signal.aborted,true);
-  waiting.resolve(response({query:{pages:[commonsPage()]}}));await tick();assert.ok(!host.innerHTML.includes('extra-ipa'));assert.ok(!host.innerHTML.includes('正在查询'));env.api.unmount();
-});
-await test('IPA remains visible with an explicit notice when no source recording passes verification',async()=>{
-  const env=sandbox(async url=>response(url.startsWith('https://commons.')?{query:{pages:[commonsPage({extmetadata:{LicenseShortName:{value:'All rights reserved'}}})]}}:page(fixture))),host=new Host();
-  env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('pronunciations');await tick();
-  assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.ok(host.innerHTML.includes('此来源暂无可核对的录音版本'));assert.equal(host.audios.length,0);env.api.unmount();
 });
 await test('temporary toggles escape source content and remain separate from saved definitions',async()=>{
   const hostile='==Swedish==\n===Adjective===\n# safe\n#: {{ux|sv|&lt;img onerror=alert(1)&gt;|<img src=x onerror=alert(2)> bad}}';
@@ -224,16 +171,68 @@ await test('temporary toggles escape source content and remain separate from sav
 });
 await test('offline cached toggles work without network and offline uncached buttons explain availability',async()=>{
   const env=sandbox(),host=new Host();env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('examples');await tick();const count=env.calls.length;
-  env.window.navigator.onLine=false;env.events.offline();host.click('synonyms');assert.equal(env.calls.length,count);assert.ok(host.innerHTML.includes('本次会话缓存'));
+  env.window.navigator.onLine=false;env.events.offline();host.click('synonyms');assert.equal(env.calls.length,count);assert.ok(host.innerHTML.includes('välsmakande'));assert.ok(!host.innerHTML.includes('extras-source'));
   host.click('pronunciations');assert.equal(env.calls.length,count);assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.ok(!host.innerHTML.includes('未找到可用缓存'));
   const other=new Host();env.api.mount(other,{lemma:'missing',pos:'noun'});assert.equal(other.querySelector('[data-extra="examples"]').disabled,true);assert.match(other.innerHTML,/联网后可查询/);env.api.unmount();
 });
 await test('memory cache expires after 24 hours and never persists or retains more than 40 results',async()=>{
   const env=sandbox(async url=>response(page(fixture,new URL(url).searchParams.get('titles'))));
-  for(let i=0;i<41;i++){const host=new Host();env.api.mount(host,{lemma:'word'+i,pos:'adjective'});host.click('examples');await tick();}
-  assert.equal(env.calls.length,41);let host=new Host();env.api.mount(host,{lemma:'word0',pos:'adjective'});await tick();assert.equal(env.calls.length,42);
-  host=new Host();env.api.mount(host,{lemma:'word40',pos:'adjective'});await tick();assert.equal(env.calls.length,42);
-  env.advance(24*60*60*1000+1);host=new Host();env.api.mount(host,{lemma:'word40',pos:'adjective'});await tick();assert.equal(env.calls.length,43);env.api.unmount();
+  for(let i=0;i<41;i++){const host=new Host();env.api.mount(host,{lemma:'word'+String.fromCharCode(97+Math.floor(i/26))+String.fromCharCode(97+i%26),pos:'adjective'});host.click('examples');await tick();}
+  assert.equal(env.calls.length,41);let host=new Host();env.api.mount(host,{lemma:'wordaa',pos:'adjective'});await tick();assert.equal(env.calls.length,42);
+  host=new Host();env.api.mount(host,{lemma:'wordbo',pos:'adjective'});await tick();assert.equal(env.calls.length,42);
+  env.advance(24*60*60*1000+1);host=new Host();env.api.mount(host,{lemma:'wordbo',pos:'adjective'});await tick();assert.equal(env.calls.length,43);env.api.unmount();
+});
+await test('button and rendered section order remains fixed regardless of activation order',async()=>{
+  const env=sandbox(),host=new Host();env.api.mount(host,{swedish:'god',lemma:'god',pos:'adjective'});
+  assert.deepEqual(host.buttons.map(x=>x.dataset.extra),['synonyms','antonyms','pronunciations','examples']);
+  for(const type of ['examples','pronunciations','antonyms','synonyms']){host.click(type);await tick();}
+  assert.deepEqual(Array.from(host.innerHTML.matchAll(/data-extra-section="([^"]+)"/g),m=>m[1]),['synonyms','antonyms','pronunciations','examples']);
+  assert.equal(env.calls.length,1);assert.equal(host.audios.length,0);assert.ok(!host.innerHTML.includes('出处'));assert.ok(!host.innerHTML.includes('Wiktionary'));assert.ok(!host.innerHTML.includes('CC BY'));env.api.unmount();
+});
+await test('current inflected Swedish form is tried first and missing categories use the exact authored lemma',async()=>{
+  const inflected='==Swedish==\n===Pronunciation===\n* {{IPA|sv|/ɡɔt/}}\n===Adjective===\n# {{inflection of|sv|god||n|s|indef}}';
+  const env=sandbox(async url=>{const title=new URL(url).searchParams.get('titles');return response(page(title==='gott'?inflected:fixture,title));});
+  const word=Object.freeze({swedish:'ett gott (adjektiv)',lemma:'god',pos:'adjective'}),value=await env.api.load(word);
+  assert.deepEqual(env.calls.map(x=>new URL(x.url).searchParams.get('titles')),['gott','god']);
+  assert.equal(value.examples[0].sv,'en god människa');assert.deepEqual(plain(value.pronunciations),[{text:'/ɡɔt/',kind:'ipa'}]);assert.equal(word.swedish,'ett gott (adjektiv)');
+  const refs=plain(env.api.getCredits());assert.deepEqual(refs.map(x=>x.title),['gott','god']);assert.deepEqual(Object.keys(refs[0]),['source','title','revision','url','license']);
+  refs[0].title='changed';assert.equal(env.api.getCredits()[0].title,'gott');
+});
+await test('missing and foreign current entries fall back only to a validated authored lemma',async()=>{
+  for(const current of [{query:{pages:[{ns:0,title:'gott',missing:true}]}},page('==English==\n===Adjective===\n#: {{ux|sv|Wrong|Wrong}}','gott')]){
+    const env=sandbox(async url=>response(new URL(url).searchParams.get('titles')==='gott'?current:page(fixture)));
+    const value=await env.api.load({swedish:'gott',lemma:'god',pos:'adjective'});assert.equal(value.examples[0].sv,'en god människa');assert.equal(env.calls.length,2);assert.ok(!JSON.stringify(value).includes('Wrong'));
+  }
+  const invalid=sandbox(async()=>response(page('==English==\nword','gott')));await assert.rejects(invalid.api.load({swedish:'gott',lemma:'https://evil.test',pos:'adjective'}),/没有找到/);assert.equal(invalid.calls.length,1);
+});
+await test('fully populated current form avoids fallback and repeated form/lemma never duplicates a request',async()=>{
+  const env=sandbox(async()=>response(page(fixture,'gott')));await env.api.load({swedish:'gott',lemma:'god',pos:'adjective'});assert.equal(env.calls.length,1);
+  const same=sandbox();await same.api.load({swedish:'en god (adj.)',lemma:'god',pos:'adjective'});assert.equal(same.calls.length,1);
+});
+await test('wrong-POS and foreign lemma entries never supply examples or relations',async()=>{
+  const env=sandbox(async url=>response(page(new URL(url).searchParams.get('titles')==='gott'?'==Swedish==\n===Adjective===\n# {{inflection of|sv|god}}':'==English==\n===Adjective===\n#: {{ux|sv|foreign|bad}}','gott')));
+  const value=await env.api.load({swedish:'gott',lemma:'god',pos:'adjective'});assert.equal(value.examples.length,0);assert.equal(value.synonyms.length,0);assert.equal(env.calls.length,2);
+  const wrong=sandbox(async()=>response(page(fixture)));const noun=await wrong.api.load({swedish:'god',lemma:'god',pos:'phrase'});assert.equal(noun.examples.length,0);assert.equal(noun.synonyms.length,0);
+});
+await test('pronunciation display cannot leak unmarked, foreign-language or audio content',async()=>{
+  const text='==English==\n===Pronunciation===\n* {{IPA|en|/bad-en/}}\n==Swedish==\n===Pronunciation===\n* {{IPA|en|/bad-section/}}\n* {{IPA|/unmarked/}}\n* {{IPA|sv|/ɡuːd/|[ɡʊd]|not IPA|/broken}}\n* {{audio|sv|Sv-god.ogg|Sweden}}\n==French==\n* {{IPA|sv|/bad-fr/}}';
+  const env=sandbox(async()=>response(page(text))),host=new Host();env.api.mount(host,{swedish:'god',lemma:'god',pos:'adjective'});host.click('pronunciations');await tick();
+  assert.ok(host.innerHTML.includes('/ɡuːd/'));assert.ok(host.innerHTML.includes('[ɡʊd]'));assert.ok(!host.innerHTML.includes('bad-'));assert.ok(!host.innerHTML.includes('unmarked'));assert.equal(host.audios.length,0);assert.equal(env.calls.length,1);assert.ok(env.calls.every(x=>new URL(x.url).hostname==='en.wiktionary.org'));env.api.unmount();
+});
+await test('every related word links safely to its Swedish dictionary section and preserves lexical phrases',async()=>{
+  const text='==Swedish==\n===Adjective===\n# safe\n#: {{syn|sv|snäll|en gång|javascript:alert(1)|https://evil.test|<img src=x onerror=alert(1)>}}\n#: {{ant|sv|elak}}';
+  const env=sandbox(async()=>response(page(text))),host=new Host();env.api.mount(host,{lemma:'god',pos:'adjective'});host.click('synonyms');host.click('antonyms');await tick();
+  for(const term of ['snäll','en gång','elak'])assert.ok(host.innerHTML.includes('href="https://en.wiktionary.org/wiki/'+encodeURIComponent(term)+'#Swedish" target="_blank" rel="noopener noreferrer"'));
+  assert.ok(!host.innerHTML.includes('evil.test'));assert.ok(!host.innerHTML.includes('javascript:'));assert.ok(!host.innerHTML.includes('<img'));assert.equal(env.api.lookupUrl('en gång'),'https://en.wiktionary.org/wiki/en%20g%C3%A5ng#Swedish');assert.equal(env.api.lookupUrl('javascript:alert(1)'),'');env.api.unmount();
+});
+await test('cancelling the current form response prevents a lemma fallback and any stale credit entry',async()=>{
+  const waiting=deferred(),env=sandbox(()=>waiting.promise),controller=new AbortController();const pending=env.api.load({swedish:'gott',lemma:'god',pos:'adjective'},controller.signal);
+  controller.abort();waiting.resolve(response(page('==English==\nword','gott')));await assert.rejects(pending,/取消/);assert.equal(env.calls.length,1);assert.equal(env.api.getCredits().length,0);
+});
+await test('credits remain bounded, ephemeral and do not read learning or token storage',async()=>{
+  const env=sandbox(async url=>response(page(fixture,new URL(url).searchParams.get('titles'))));
+  for(let i=0;i<81;i++)await env.api.load({lemma:'ord'+String.fromCharCode(97+Math.floor(i/26))+String.fromCharCode(97+i%26),pos:'adjective'});
+  assert.equal(env.api.getCredits().length,80);assert.equal(sandbox().api.getCredits().length,0);assert.ok(!source.includes('commons.wikimedia.org'));assert.ok(!source.includes('audioInfo'));assert.ok(!source.includes('localStorage'));assert.ok(!source.includes('sessionStorage'));
 });
 console.log(`\n${passed} word extras checks passed${failed?`, ${failed} failed`:''}.`);if(failed)process.exitCode=1;
 })();

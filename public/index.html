@@ -18,11 +18,15 @@
   <link rel="stylesheet" href="workspace.css">
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="review.css">
+  <link rel="stylesheet" href="plan.css">
   <link rel="stylesheet" href="sync-health.css">
   <link rel="stylesheet" href="word-extras.css">
   <script src="study.js" defer></script>
   <script src="review.js" defer></script>
   <script src="session.js" defer></script>
+  <script src="plan-core.js" defer></script>
+  <script src="plan-session.js" defer></script>
+  <script src="plan.js" defer></script>
   <script src="settings.js" defer></script>
   <script src="github-sync.js" defer></script>
   <script src="cloud.js" defer></script>
@@ -36,13 +40,15 @@
     <header class="site-header">
       <a class="brand" href="./" aria-label="Ordrum 首页"><span class="brand-icon" aria-hidden="true">ö</span><span>ordrum<span class="brand-subtitle">瑞典语单词室</span></span></a>
       <nav class="header-actions" aria-label="工具">
+        <button class="quiet-button page-nav is-active" id="study-page-button" aria-current="page">首页</button>
+        <button class="quiet-button page-nav" id="plan-page-button">计划学习</button>
         <button class="quiet-button icon-label" id="tasks-button"><span data-icon="cards"></span><span>学习任务</span></button>
         <button class="quiet-button icon-label settings-trigger" id="settings-button" aria-label="设置"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 1-1h4l1 1 .5 2 2 1 2-.5 2 3-1.5 1.5v3L21 15l-2 3-2-.5-2 1-.5 2h-5l-.5-2-2-1-2 .5-2-3L5 13v-3L3.5 8.5l2-3 2 .5 2-1Z"/><circle cx="12" cy="11.5" r="3"/></svg><span>设置</span><span id="settings-sync-badge" class="settings-sync-badge" hidden></span></button>
       </nav>
     </header>
 
     <main>
-      <div class="workspace">
+      <div class="workspace" id="home-page">
         <aside class="library-panel" aria-label="书籍和章节">
           <div class="panel-eyebrow">书架</div>
           <label class="sr-only" for="book-select">选择书籍</label>
@@ -58,13 +64,15 @@
         </aside>
 
         <section class="learning-panel" aria-label="学习区">
-          <div id="today-plan"></div>
           <div id="task-context"></div>
           <div class="learning-heading"><div><h1 id="selection-title">正在加载单词…</h1><p id="selection-description"></p></div><div class="learned-summary"><span class="learned-icon" data-icon="check"></span><div><strong id="known-count">0</strong><span>已掌握</span></div></div></div>
+          <div id="home-practice-slot"><div id="study-surface">
           <div class="mode-toolbar"><div class="mode-tabs" role="tablist" aria-label="学习模式"><button id="tab-preview" class="mode-tab active" role="tab" aria-selected="true" aria-controls="mode-content" data-mode="preview"><span data-icon="grid"></span>预览</button><button id="tab-flashcard" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="flashcard"><span data-icon="cards"></span>翻卡片</button><button id="tab-dictation" class="mode-tab" role="tab" aria-selected="false" aria-controls="mode-content" data-mode="dictation"><span data-icon="headphones"></span>听写</button></div></div>
           <div id="mode-content" role="tabpanel" aria-labelledby="tab-preview"><div class="loading-state"><span class="spinner"></span><p>正在打开你的单词卡…</p></div></div>
+          </div></div>
         </section>
       </div>
+      <section id="plan-page" aria-label="计划学习" hidden></section>
       <footer class="site-footer"><span>Ordrum</span><span id="source-footer">Rivstart A1/A2 Ordkort</span></footer>
     </main>
   </div>

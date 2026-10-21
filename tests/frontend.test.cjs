@@ -52,7 +52,7 @@ function element(key = '') {
     classList:{add(){},remove(){},toggle(){}},
     addEventListener(type,fn){if (!listeners.has(type)) listeners.set(type,[]);listeners.get(type).push(fn);},
     dispatch(type,event){for (const fn of listeners.get(type)||[]) fn(event);},
-    setAttribute(){},focus(){document.activeElement=this;},scrollIntoView(){},
+    setAttribute(){},removeAttribute(){},appendChild(child){child.parentNode=this;},focus(){document.activeElement=this;},scrollIntoView(){},
     setSelectionRange(start,end,direction='none'){this.selectionStart=start;this.selectionEnd=end;this.selectionDirection=direction;},
     contains(other){return other===this||key==='#app-dialog'&&!!other?.dialogOwned&&Array.from(elements.values()).includes(other);},
     querySelectorAll(){return key==='#app-dialog'?Array.from(elements.values()).filter(item=>item.dialogOwned):[];},querySelector(selector){return lookup(selector);},
@@ -81,7 +81,7 @@ const sandbox = {
 };
 sandbox.window.localStorage = sandbox.localStorage;
 vm.createContext(sandbox);
-for (const name of ['study.js','review.js','session.js','cloud.js','sync-health.js']) {
+for (const name of ['study.js','review.js','plan-core.js','session.js','plan-session.js','cloud.js','sync-health.js']) {
   const modulePath=path.resolve(__dirname,'../public',name);
   vm.runInContext(fs.readFileSync(modulePath,'utf8'),sandbox,{filename:modulePath});
 }
@@ -499,7 +499,7 @@ function browserReload() {
   const reloaded={...sandbox,document:{...document,addEventListener(){}},window:{addEventListener(){}},speechCalls:[]};
   reloaded.window.localStorage = reloaded.localStorage;
   vm.createContext(reloaded);
-  for(const name of ['study.js','review.js','session.js','cloud.js','sync-health.js','app.js']) {
+  for(const name of ['study.js','review.js','plan-core.js','session.js','plan-session.js','cloud.js','sync-health.js','app.js']) {
     const modulePath=path.resolve(__dirname,'../public',name);
     const code=fs.readFileSync(modulePath,'utf8').replace(/\ninit\(\);\s*$/,'\n');
     vm.runInContext(code,reloaded,{filename:modulePath});
