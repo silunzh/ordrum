@@ -99,7 +99,7 @@ function enterPlanStage({autoplay = true} = {}) {
   dictationAnswers = {}; mistakes = new Set(); page = 1; search = ''; retryMode = true;
   state.mode = stage.mode; reviewSessionId = newReviewSessionId(); planKind = 'plan';
   const saved = record.stageSessions[stage.id];
-  if (saved && saved.mode === stage.mode) restoreStudySession(saved);
+  if (saved && saved.mode === stage.mode) restoreStudySession(saved,{preserveSelection:true});
   // The latest checkpoint supplies position; every merged stage member stays reachable.
   const actual = new Set(record.resolvedStages[stage.id]);
   currentDeck = [...new Set([...currentDeck.filter(id=>actual.has(id)),...actual])];

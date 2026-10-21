@@ -32,17 +32,17 @@ function captureStudySession() {
     state.studySession = session;
   }
 }
-function restoreStudySession(saved) {
+function restoreStudySession(saved,{preserveSelection = false} = {}) {
   const validIds = new Set(data.words.map(word => word.id));
   const session = StudyCore.sanitiseSession(saved,validIds);
   if (!session || !session.deck.length) return false;
   const task = activeStudyTask();
-  if (!task && session.bookId) {
+  if (!preserveSelection && !task && session.bookId) {
     state.selectedBook = session.bookId === '__notebook__' ? '__notebook__' : data.book.id;
     if (state.selectedBook === '__notebook__' && session.notebookChapterIds) state.selectedNotebookChapters = StudyCore.notebookChapterSelection({...state,selectedNotebookChapters:session.notebookChapterIds});
   }
   const chapters = new Set(data.chapters.map(chapter => Number(chapter.id)));
-  if (!task && state.selectedBook !== '__notebook__' && session.chapterIds?.length) {
+  if (!preserveSelection && !task && state.selectedBook !== '__notebook__' && session.chapterIds?.length) {
     state.selectedChapters = session.chapterIds.filter(id => chapters.has(Number(id)));
   }
   const allowed = new Set(task ? task.wordIds : state.selectedBook === '__notebook__' ? StudyCore.notebookSelectedIds(state) : data.words.filter(word => state.selectedChapters.includes(Number(word.chapter))).map(word => word.id));

@@ -1,7 +1,7 @@
 'use strict';
 
 // scripts/version-pwa.cjs stamps this from the complete static shell before build.
-const BUILD_ID = 'd4dda7edadb1d06c';
+const BUILD_ID = 'c1cfbe666a60bfb0';
 const BASE_URL = new URL('./',self.location.href);
 const CACHE_SCOPE = BASE_URL.pathname === '/' ? '' : `${encodeURIComponent(BASE_URL.pathname)}-`;
 const SHELL_PREFIX = `ordrum-shell-${CACHE_SCOPE}`;
