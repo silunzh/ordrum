@@ -14,7 +14,7 @@ const sha=number=>number.toString(16).padStart(40,'0');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function response(value,status=200,headers={}) {return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json',...headers}});}
 function storage(map,{deny=false,denyRemove=false}={}) {return {getItem(key){return map.get(key)||null;},setItem(key,value){if(deny)throw new Error('no storage');map.set(key,value);},removeItem(key){if(denyRemove)throw new Error('no remove');map.delete(key);}};}
-function harness({session=new Map(),local=new Map(),saved=true,fetchHook,localOptions={}}={}) {
+function harness({session=new Map(),local=new Map(),saved=true,fetchHook,localOptions={},sourceOverride=source}={}) {
   if(saved&&!session.has(KEY)&&!local.has(KEY))session.set(KEY,JSON.stringify(config));
   const requests=[],notices=[],controls=new Map();let writes=0;
   const server={private:true,repoStatus:200,userStatus:200,branchStatus:200,record:null,revision:0,sha:null,fileOverride:null,writeStatus:200,visibility:'private',repoId:12};
@@ -23,7 +23,7 @@ function harness({session=new Map(),local=new Map(),saved=true,fetchHook,localOp
     const text=JSON.stringify(record),data=Buffer.from(text);
     return response({type:'file',encoding:'base64',size:data.length,sha:blobSha,content:data.toString('base64')});
   }
-  function commit(state,revision=server.revision+1){server.revision=revision;server.sha=sha(revision);server.record={version:1,accountId,revision,updatedAt:'2026-10-21T12:00:00.000Z',state};}
+  function commit(state,revision=server.revision+1,version=1){server.revision=revision;server.sha=sha(revision);server.record={version,accountId,revision,updatedAt:'2026-10-21T12:00:00.000Z',state};}
   const window={crypto:webcrypto,AbortController,setTimeout,clearTimeout,btoa:value=>Buffer.from(value,'binary').toString('base64'),atob:value=>Buffer.from(value,'base64').toString('binary'),
     sessionStorage:storage(session),localStorage:storage(local,localOptions),OrdrumCloud:{updateConnectionStatus(){}},
     async fetch(url,options){
@@ -49,7 +49,7 @@ function harness({session=new Map(),local=new Map(),saved=true,fetchHook,localOp
       throw new Error('Unexpected endpoint '+target.pathname);
     }};
   const document={querySelector(selector){if(!controls.has(selector))controls.set(selector,{hidden:true,textContent:'',onclick:null});return controls.get(selector);}};
-  vm.runInNewContext(source,{window,document,URL,Response,TextEncoder,TextDecoder,Uint8Array,Date,console},{filename:sourcePath});
+  vm.runInNewContext(sourceOverride,{window,document,URL,Response,TextEncoder,TextDecoder,Uint8Array,Date,console},{filename:sourcePath});
   const api=window.OrdrumGitHubSync;const options=api.cloudOptions(message=>notices.push(message));
   return {api,options,window,server,requests,notices,controls,session,local,commit,file,get writes(){return writes;}};
 }
@@ -72,8 +72,33 @@ async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
     const app=harness();app.commit({marks:{'åäö':{status:'known'}},tasks:[]},4);
     const first=await(await app.api.transport('GET')).json();assert.equal(first.state.marks['åäö'].status,'known');
     const written=await(await app.api.transport('PUT',{state:{marks:{'Ångström':{status:'known'}}},baseRevision:4,expectedAccountId:accountId})).json();
-    assert.equal(written.revision,5);assert.equal(app.server.record.state.marks['Ångström'].status,'known');assert.equal(app.requests.find(r=>r.options.method==='PUT').body.sha,sha(4));assert.equal(app.writes,1);
+    assert.equal(written.revision,5);assert.equal(app.server.record.version,2);assert.equal(app.server.record.state.marks['Ångström'].status,'known');assert.equal(app.requests.find(r=>r.options.method==='PUT').body.sha,sha(4));assert.equal(app.writes,1);
     assert.equal(JSON.stringify(app.server.record).includes(token),false);assert.equal(own(written,'sha'),false);
+  });
+  await test('version 1 progress upgrades to version 2 while preserving notebook units and account identity',async()=>{
+    const app=harness();const units={'unit-1':{id:'unit-1',name:'错词单元 1',wordIds:['å','ä','ö'],updatedAt:'2026-10-21T12:00:00.000Z'}};
+    app.commit({marks:{},notebookUnits:units},7,1);
+    const priorRecord=await(await app.api.transport('GET')).json();assert.deepEqual(priorRecord.state.notebookUnits,units);
+    const nextState={...priorRecord.state,marks:{å:{status:'known'}}};
+    await app.api.transport('PUT',{state:nextState,baseRevision:7,expectedAccountId:accountId});
+    assert.equal(app.server.record.version,2);assert.equal(app.server.record.revision,8);assert.equal(app.server.record.accountId,accountId);assert.deepEqual(app.server.record.state.notebookUnits,units);
+    const reread=await(await app.api.transport('GET')).json();assert.deepEqual(reread.state.notebookUnits,units);assert.equal(reread.state.marks.å.status,'known');
+    await app.api.transport('PUT',{state:reread.state,baseRevision:8,expectedAccountId:accountId});assert.equal(app.server.record.version,2);assert.equal(app.server.record.revision,9);
+  });
+  await test('new empty repositories start with a version 2 progress envelope',async()=>{
+    const app=harness();await app.api.transport('PUT',{state:{marks:{},notebookUnits:{}},baseRevision:0,expectedAccountId:accountId});
+    assert.equal(app.server.record.version,2);assert.equal(app.server.record.revision,1);assert.deepEqual(app.server.record.state.notebookUnits,{});
+  });
+  await test('the deployed version 1 reader contract rejects version 2 before any stale-client write',async()=>{
+    // Keep the exact legacy version guard inline so this compatibility check
+    // also runs in a shallow Pages checkout without historical Git objects.
+    const guard='![1,RECORD_VERSION].includes(record.version)';assert.equal(source.split(guard).length,2);
+    const legacyReader=source.replace(guard,'record.version !== 1');
+    const app=harness({sourceOverride:legacyReader});const units={'unit-1':{wordIds:['å','ä','ö']}};
+    app.commit({marks:{},notebookUnits:units},8,2);
+    await assert.rejects(app.api.transport('GET'),error=>error.code==='GITHUB_INVALID_FILE');
+    await assert.rejects(app.api.transport('PUT',{state:{marks:{å:{status:'known'}}},baseRevision:8,expectedAccountId:accountId}),error=>error.code==='GITHUB_INVALID_FILE');
+    assert.equal(app.writes,0);assert.equal(app.requests.some(request=>request.options.method==='PUT'),false);assert.equal(app.server.record.version,2);assert.deepEqual(app.server.record.state.notebookUnits,units);
   });
   await test('a stale revision or different account returns current state without writing',async()=>{
     const app=harness();app.commit({tasks:[{id:'remote'}]},3);
